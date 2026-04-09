@@ -59,6 +59,7 @@ export class VscodeDriver {
             stdio: "pipe",
             timeout: 120_000,
             env: { ...process.env },
+            shell: true,  // Required on Windows for .cmd files
           });
         } catch (e) {
           console.warn(`   ⚠️  Failed to install ${extId}: ${(e as Error).message}`);
