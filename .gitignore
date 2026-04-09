@@ -1,0 +1,27 @@
+node_modules/
+dist/
+*.js
+*.d.ts
+*.js.map
+!src/**/*
+
+# Test results
+test-results/
+results.json
+*.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# VSCode test artifacts
+.vscode-test/
+
+# Temp
+*.tmp
+.autotest-*/

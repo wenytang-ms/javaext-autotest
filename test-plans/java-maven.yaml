@@ -1,0 +1,78 @@
+# Test Plan: Java Maven Project (from vscode-java-pack.wiki)
+#
+# 来源: wiki Test-Plan.md "Maven" 场景
+# 验证: 打开 Maven 项目 → LS 就绪 → 基本编辑体验（诊断、补全、Code Action）
+#
+# 前置条件:
+#   - vscode-java 仓库已 clone 到本地
+#   - JDK 已安装且可用
+#   - Maven 已安装
+#
+# 用法: autotest run test-plans/java-maven.yaml
+
+name: "Java Maven Project — 项目导入与基本编辑"
+description: |
+  对应 wiki Test Plan 的 Maven 场景:
+  打开 Maven 项目 salut，验证语言服务器正常启动，
+  验证基本编辑体验包括诊断、代码补全和 Code Action 功能。
+
+setup:
+  extension: "redhat.java"
+  vscodeVersion: "stable"
+  workspace: "../../vscode-java/test/resources/projects/maven/salut"
+  timeout: 90  # Maven 项目导入可能较慢
+
+steps:
+  # ── Step 1: 等待语言服务器就绪 ──────────────────────────
+  # wiki: "After the language server is initialized, check the status bar
+  #        icon is 👍, and the problems views has several warnings
+  #        but without errors."
+  # 🔴 需要新 driver: waitForLanguageServer, getProblemsCount
+  - id: "ls-ready"
+    action: "waitForLanguageServer"
+    verify: "状态栏显示 Java 语言服务器已就绪"
+    verifyProblems:
+      errors: 0
+      # warnings: ">0"  # 有若干 warnings 但无 errors
+    timeout: 120
+
+  # ── Step 2: 打开 Java 文件验证编辑体验 ─────────────────
+  # wiki: "Editing experience is correctly working including
+  #        diagnostics, code completion and code actions."
+
+  # 2a. 打开文件
+  - id: "open-java-file"
+    action: "打开文件 src/main/java/Foo.java"
+    verify: "Foo.java 文件已在编辑器中打开"
+    timeout: 10
+
+  # 2b. 验证诊断（此项目应无错误）
+  - id: "verify-no-errors"
+    action: "等待 3 秒"
+    verify: "Foo.java 无编译错误"
+    verifyProblems:
+      errors: 0
+
+  # 2c. 验证代码补全
+  # 🔴 需要新 driver: typeInEditor, triggerCompletion, getCompletionItems
+  - id: "verify-completion"
+    action: "triggerCompletionAt endOfMethod"
+    verify: "代码补全列表出现，包含合理的补全项"
+    verifyCompletion:
+      notEmpty: true
+
+  # 2d. 验证 Code Action
+  # 🔴 需要新 driver: 插入有问题的代码 → 检查 Code Action 是否出现
+  - id: "type-unresolved-code"
+    action: "typeInEditor ArrayList list = new ArrayList();"
+    verify: "编辑器中出现诊断提示（ArrayList 未导入）"
+    verifyProblems:
+      errors: 1
+
+  - id: "verify-code-action"
+    action: "applyCodeAction Import 'ArrayList' (java.util)"
+    verify: "import 语句被添加，错误消失"
+    verifyProblems:
+      errors: 0
+    verifyEditor:
+      contains: "import java.util.ArrayList"

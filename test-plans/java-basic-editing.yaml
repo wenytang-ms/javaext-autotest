@@ -1,0 +1,94 @@
+# Test Plan: Java Basic Editing (from vscode-java-pack.wiki)
+#
+# 来源: wiki Test-Plan.md "Basic" 场景 (Steps 1-5)
+# 验证: 打开 Eclipse 项目 → 语言服务器就绪 → 代码片段 → Code Action 修复错误
+#
+# 前置条件:
+#   - vscode-java 仓库已 clone 到本地
+#   - JDK 已安装且可用
+#
+# 用法: autotest run test-plans/java-basic-editing.yaml
+
+name: "Java Basic Editing — 诊断、代码片段、Code Action"
+description: |
+  对应 wiki Test Plan 的 Basic 场景前 5 步:
+  打开 simple-app Eclipse 项目，验证语言服务器启动，
+  使用 class 代码片段修复 Foo.java，通过 Code Action 补全缺失方法，
+  最终编译无错误。
+
+setup:
+  extension: "redhat.java"
+  # 如果需要测试扩展开发版本，取消注释:
+  # extensionPath: "../../vscode-java"
+  vscodeVersion: "stable"
+  workspace: "../../vscode-java/test/resources/projects/eclipse/simple-app"
+  timeout: 60  # Java LS 启动较慢，需要足够等待时间
+
+steps:
+  # ── Step 1: 打开项目 ──────────────────────────────────────
+  # wiki: "Open simple-app"
+  # 由 setup.workspace 自动完成，此步骤仅验证项目已加载
+  - id: "project-loaded"
+    action: "等待 5 秒"
+    verify: "项目文件树可见"
+
+  # ── Step 2: 语言服务器就绪 + 诊断 ────────────────────────
+  # wiki: "After the language server is initialized, check the status bar
+  #        icon is 👍, and the problems view has two errors."
+  # 🔴 需要新 driver 能力:
+  #   - waitForLanguageServer(): 等待 LS 激活（轮询状态栏）
+  #   - getProblemsCount(): 获取 Problems 面板的 error/warning 计数
+  - id: "ls-ready"
+    action: "waitForLanguageServer"
+    verify: "状态栏显示 Java 语言服务器已就绪（👍 图标）"
+    verifyProblems:
+      errors: 2
+    timeout: 120
+
+  # ── Step 3: 使用 class 代码片段修复 Foo.java ─────────────
+  # wiki: "Select Foo.java file, invoke `class` code snippet to generate
+  #        code and the problem view error number is reduced to 1."
+  # 🔴 需要新 driver 能力:
+  #   - typeInEditor(text): 在编辑器中输入文本
+  #   - triggerSnippet(name) 或 selectCompletion(name): 选择代码片段补全
+  - id: "open-foo"
+    action: "打开文件 src/app/Foo.java"
+    verify: "Foo.java 文件已在编辑器中打开"
+
+  - id: "apply-class-snippet"
+    action: "typeAndTriggerSnippet class"
+    verify: "编辑器中生成了 Foo 类的代码骨架"
+    verifyEditor:
+      contains: "public class Foo"
+    verifyProblems:
+      errors: 1
+
+  # ── Step 4: 通过 Code Action 创建缺失方法 ───────────────
+  # wiki: "Click the remain error in the diagnostic window, the code action
+  #        icon should pop up. Select 'Create method call() in type Foo'."
+  # 🔴 需要新 driver 能力:
+  #   - navigateToError(index): 跳转到第 N 个错误
+  #   - applyCodeAction(label): 应用指定的 Code Action
+  - id: "navigate-to-error"
+    action: "navigateToError 1"
+    verify: "光标跳转到 Bar.java 中的 f.call() 位置"
+
+  - id: "apply-code-action"
+    action: "applyCodeAction Create method 'call()' in type 'Foo'"
+    verify: "Foo.java 中生成了 call() 方法"
+    verifyProblems:
+      errors: 0
+
+  # ── Step 5: 保存 + 强制编译 ─────────────────────────────
+  # wiki: "Save all the files, and invoke VSCode command
+  #        'Java: Force Java compilation'. There should be no errors."
+  - id: "save-all"
+    action: "执行命令 File: Save All"
+    verify: "所有文件已保存"
+
+  - id: "force-compile"
+    action: "执行命令 Java: Force Java Compilation"
+    waitBefore: 3
+    verify: "编译完成"
+    verifyProblems:
+      errors: 0

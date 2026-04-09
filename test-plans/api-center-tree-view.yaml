@@ -1,0 +1,37 @@
+# 示例 Test Plan: 验证 Azure API Center 树视图导航
+#
+# 用法: autotest run test-plans/api-center-tree-view.yaml
+
+name: "验证 API Center 树视图导航"
+description: "测试 Azure API Center 扩展的树视图展开、刷新、订阅选择功能"
+
+setup:
+  extension: "azure-api-center"
+  extensionPath: "../../vscode-azureapicenter"
+  vscodeVersion: "insiders"
+  workspace: "./test-workspace"
+  settings:
+    azure-api-center.selectedSubscriptions:
+      - "tenant-id/subscription-id"
+    azure-api-center.tenant:
+      name: "test-tenant"
+      id: "tenant-id"
+  timeout: 15          # 等待扩展加载的时间（秒）
+
+steps:
+  - id: "check-tab"
+    action: "点击侧边栏 API Center tab"
+    verify: "API Center 面板可见"
+
+  - id: "expand-subscription"
+    action: "展开 Azure Subscription 节点"
+    verify: "能看到 apic-test service 节点"
+    timeout: 30
+
+  - id: "expand-service"
+    action: "点击 apic-test 节点"
+    verify: "能看到 APIs 子节点"
+
+  - id: "expand-apis"
+    action: "展开 APIs 节点"
+    verify: "能看到至少一个 API 条目"
