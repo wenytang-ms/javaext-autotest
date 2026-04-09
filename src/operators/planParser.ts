@@ -61,6 +61,7 @@ function validateTestPlan(raw: Record<string, unknown>): TestPlan {
     setup: {
       extension: setup.extension as string,
       extensionPath: setup.extensionPath as string | undefined,
+      extensions: setup.extensions as string[] | undefined,
       vscodeVersion: (setup.vscodeVersion as "stable" | "insiders") ?? "insiders",
       workspace: setup.workspace as string | undefined,
       settings: setup.settings as Record<string, unknown> | undefined,

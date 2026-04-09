@@ -24,6 +24,7 @@ export class TestRunner {
       extensionPath: plan.setup.extensionPath
         ? path.resolve(plan.setup.extensionPath)
         : undefined,
+      extensions: plan.setup.extensions,
       workspacePath: plan.setup.workspace
         ? path.resolve(plan.setup.workspace)
         : undefined,

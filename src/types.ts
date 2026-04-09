@@ -14,6 +14,8 @@ export interface TestPlan {
 export interface TestSetup {
   extension: string;
   extensionPath?: string;
+  /** Marketplace extensions to install before launch (e.g. ["vscjava.vscode-java-pack"]) */
+  extensions?: string[];
   vscodeVersion?: "stable" | "insiders";
   workspace?: string;
   settings?: Record<string, unknown>;
@@ -85,6 +87,8 @@ export interface Diagnostic {
 export interface VscodeDriverOptions {
   vscodeVersion?: "stable" | "insiders";
   extensionPath?: string;
+  /** Marketplace extension IDs to install before launch */
+  extensions?: string[];
   workspacePath?: string;
   userDataDir?: string;
   settings?: Record<string, unknown>;

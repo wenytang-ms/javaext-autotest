@@ -18,6 +18,8 @@ description: |
 
 setup:
   extension: "redhat.java"
+  extensions:
+    - "vscjava.vscode-java-pack"
   vscodeVersion: "stable"
   workspace: "../../vscode-java/test/resources/projects/maven/salut"
   timeout: 90  # Maven 项目导入可能较慢

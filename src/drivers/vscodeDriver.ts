@@ -9,6 +9,7 @@
 
 import { _electron, type ElectronApplication, type Page } from "@playwright/test";
 import { downloadAndUnzipVSCode, resolveCliArgsFromVSCodeExecutablePath } from "@vscode/test-electron";
+import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -40,9 +41,31 @@ export class VscodeDriver {
   async launch(): Promise<void> {
     const version = this.options.vscodeVersion ?? "insiders";
     const vscodePath = await downloadAndUnzipVSCode(version);
-    const [_cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
+    const [cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
 
     const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "autotest-"));
+
+    // Pre-install marketplace extensions before launching
+    if (this.options.extensions && this.options.extensions.length > 0) {
+      console.log(`📦 Installing ${this.options.extensions.length} extension(s)...`);
+      for (const extId of this.options.extensions) {
+        console.log(`   ↳ ${extId}`);
+        try {
+          execFileSync(cli, [
+            ...baseArgs,
+            "--install-extension", extId,
+            "--force",
+          ], {
+            stdio: "pipe",
+            timeout: 120_000,
+            env: { ...process.env },
+          });
+        } catch (e) {
+          console.warn(`   ⚠️  Failed to install ${extId}: ${(e as Error).message}`);
+        }
+      }
+      console.log(`📦 Extensions installed\n`);
+    }
 
     const args = [
       "--no-sandbox",

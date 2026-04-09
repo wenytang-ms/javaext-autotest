@@ -18,6 +18,8 @@ description: |
 
 setup:
   extension: "redhat.java"
+  extensions:
+    - "vscjava.vscode-java-pack"
   # 如果需要测试扩展开发版本，取消注释:
   # extensionPath: "../../vscode-java"
   vscodeVersion: "stable"
