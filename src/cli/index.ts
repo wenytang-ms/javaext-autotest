@@ -27,7 +27,8 @@ program
   .option("--interactive", "Step-by-step execution with manual confirmation")
   .option("--output <path>", "Output report file path")
   .option("--screenshots <dir>", "Directory to save step screenshots (default: ./screenshots)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; screenshots?: string }) => {
+  .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; screenshots?: string; llm?: boolean }) => {
     try {
       const plan = loadTestPlan(planPath);
       console.log(`📋 Test Plan: ${plan.name}`);
@@ -38,7 +39,7 @@ program
         ? path.resolve(opts.screenshots)
         : path.resolve("screenshots");
 
-      const runner = new TestRunner(plan, { screenshotDir });
+      const runner = new TestRunner(plan, { screenshotDir, noLLM: opts.llm === false });
 
       // Ensure VSCode is closed even if the process is interrupted (Ctrl+C)
       const cleanup = async () => {
