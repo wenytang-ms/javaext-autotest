@@ -13,13 +13,14 @@ export function loadTestPlan(filePath: string): TestPlan {
     throw new Error(`Test plan not found: ${absolutePath}`);
   }
 
+  const planDir = path.dirname(absolutePath);
   const content = fs.readFileSync(absolutePath, "utf-8");
   const raw = yaml.load(content) as Record<string, unknown>;
 
-  return validateTestPlan(raw);
+  return validateTestPlan(raw, planDir);
 }
 
-function validateTestPlan(raw: Record<string, unknown>): TestPlan {
+function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPlan {
   if (!raw.name || typeof raw.name !== "string") {
     throw new Error("Test plan must have a 'name' field");
   }
@@ -60,10 +61,14 @@ function validateTestPlan(raw: Record<string, unknown>): TestPlan {
     description: raw.description as string | undefined,
     setup: {
       extension: setup.extension as string,
-      extensionPath: setup.extensionPath as string | undefined,
+      extensionPath: setup.extensionPath
+        ? path.resolve(planDir, setup.extensionPath as string)
+        : undefined,
       extensions: setup.extensions as string[] | undefined,
       vscodeVersion: (setup.vscodeVersion as "stable" | "insiders") ?? "insiders",
-      workspace: setup.workspace as string | undefined,
+      workspace: setup.workspace
+        ? path.resolve(planDir, setup.workspace as string)
+        : undefined,
       settings: setup.settings as Record<string, unknown> | undefined,
       timeout: setup.timeout as number | undefined,
     },

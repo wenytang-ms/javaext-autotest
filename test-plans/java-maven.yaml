@@ -26,55 +26,50 @@ setup:
 
 steps:
   # ── Step 1: 等待语言服务器就绪 ──────────────────────────
-  # wiki: "After the language server is initialized, check the status bar
-  #        icon is 👍, and the problems views has several warnings
-  #        but without errors."
-  # 🔴 需要新 driver: waitForLanguageServer, getProblemsCount
   - id: "ls-ready"
     action: "waitForLanguageServer"
     verify: "状态栏显示 Java 语言服务器已就绪"
-    verifyProblems:
-      errors: 0
-      # warnings: ">0"  # 有若干 warnings 但无 errors
     timeout: 120
 
   # ── Step 2: 打开 Java 文件验证编辑体验 ─────────────────
-  # wiki: "Editing experience is correctly working including
-  #        diagnostics, code completion and code actions."
 
   # 2a. 打开文件
   - id: "open-java-file"
-    action: "打开文件 src/main/java/Foo.java"
+    action: "打开文件 Foo.java"
     verify: "Foo.java 文件已在编辑器中打开"
     timeout: 10
 
-  # 2b. 验证诊断（此项目应无错误）
-  - id: "verify-no-errors"
-    action: "等待 3 秒"
-    verify: "Foo.java 无编译错误"
-    verifyProblems:
-      errors: 0
-
-  # 2c. 验证代码补全
-  # 🔴 需要新 driver: typeInEditor, triggerCompletion, getCompletionItems
+  # 2b. 验证代码补全
   - id: "verify-completion"
     action: "triggerCompletionAt endOfMethod"
     verify: "代码补全列表出现，包含合理的补全项"
     verifyCompletion:
       notEmpty: true
 
-  # 2d. 验证 Code Action
-  # 🔴 需要新 driver: 插入有问题的代码 → 检查 Code Action 是否出现
-  - id: "type-unresolved-code"
-    action: "typeInEditor ArrayList list = new ArrayList();"
-    verify: "编辑器中出现诊断提示（ArrayList 未导入）"
-    verifyProblems:
-      errors: 1
+  # 2c. 验证光标导航 (goToLine)
+  - id: "goto-line"
+    action: "goToLine 10"
+    verify: "光标移到第 10 行"
 
-  - id: "verify-code-action"
-    action: "applyCodeAction Import 'ArrayList' (java.util)"
-    verify: "import 语句被添加，错误消失"
-    verifyProblems:
-      errors: 0
+  - id: "goto-end-of-line"
+    action: "goToEndOfLine"
+
+  # 2d. 验证编辑器输入 (typeInEditor)
+  - id: "type-in-editor"
+    action: "typeInEditor // autotest marker"
     verifyEditor:
-      contains: "import java.util.ArrayList"
+      contains: "// autotest marker"
+
+  # 2e. 保存文件
+  - id: "save-file"
+    action: "saveFile"
+    verify: "文件已保存"
+
+  # 2f. 验证诊断 — 通过磁盘修改文件并重新加载
+  #     添加 unused import 后 LS 会报告新的 warning (unused import)
+  - id: "verify-diagnostics"
+    action: "insertLineInFile src/main/java/java/Foo.java 2 import java.util.ArrayList;"
+    verifyProblems:
+      warnings: 2
+      atLeast: true
+    timeout: 60

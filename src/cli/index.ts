@@ -26,14 +26,29 @@ program
   .option("--attach <port>", "Connect to an existing VSCode via CDP port")
   .option("--interactive", "Step-by-step execution with manual confirmation")
   .option("--output <path>", "Output report file path")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string }) => {
+  .option("--screenshots <dir>", "Directory to save step screenshots (default: ./screenshots)")
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; screenshots?: string }) => {
     try {
       const plan = loadTestPlan(planPath);
       console.log(`📋 Test Plan: ${plan.name}`);
       console.log(`   Extension: ${plan.setup.extension}`);
       console.log(`   Steps: ${plan.steps.length}`);
 
-      const runner = new TestRunner(plan);
+      const screenshotDir = opts.screenshots
+        ? path.resolve(opts.screenshots)
+        : path.resolve("screenshots");
+
+      const runner = new TestRunner(plan, { screenshotDir });
+
+      // Ensure VSCode is closed even if the process is interrupted (Ctrl+C)
+      const cleanup = async () => {
+        console.log("\n🛑 Interrupted — closing VSCode...");
+        await runner.cleanup();
+        process.exit(130);
+      };
+      process.on("SIGINT", cleanup);
+      process.on("SIGTERM", cleanup);
+
       const report = await runner.run();
 
       // Output report

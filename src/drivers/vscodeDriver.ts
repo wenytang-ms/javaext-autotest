@@ -21,11 +21,17 @@ const ENTER_KEY = "Enter";
 const CODE_ACTION_KEY = "Control+.";
 const TRIGGER_SUGGEST_KEY = "Control+Space";
 const NEXT_MARKER_COMMAND = "Go to Next Problem (Error, Warning, Info)";
+const QUICK_INPUT_SELECTOR = ".quick-input-box input";
+const QUICK_INPUT_WIDGET_SELECTOR = ".quick-input-widget";
+const SUGGEST_WIDGET_SELECTOR = ".editor-widget.suggest-widget";
+const WORKBENCH_SELECTOR = ".monaco-workbench";
 
 export class VscodeDriver {
   private app: ElectronApplication | null = null;
   private page: Page | null = null;
   private options: VscodeDriverOptions;
+  /** Temp copy of workspace — cleaned up on close() */
+  private tempWorkspaceDir: string | null = null;
 
   constructor(options: VscodeDriverOptions = {}) {
     this.options = {
@@ -39,11 +45,24 @@ export class VscodeDriver {
   // ═══════════════════════════════════════════════════════
 
   async launch(): Promise<void> {
+    // If a previous instance is still running, close it first
+    if (this.app) {
+      console.log("⚠️  Closing previous VSCode instance...");
+      await this.close();
+    }
+
     const version = this.options.vscodeVersion ?? "insiders";
     const vscodePath = await downloadAndUnzipVSCode(version);
     const [cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
 
     const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "autotest-"));
+
+    // Wipe user data dir to prevent window restoration and stale file index.
+    // Extensions are in a separate --extensions-dir so they won't be affected.
+    const defaultUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1];
+    if (defaultUserDataDir && fs.existsSync(defaultUserDataDir)) {
+      fs.rmSync(defaultUserDataDir, { recursive: true, force: true });
+    }
 
     // Pre-install marketplace extensions before launching
     if (this.options.extensions && this.options.extensions.length > 0) {
@@ -84,15 +103,41 @@ export class VscodeDriver {
     }
 
     if (this.options.workspacePath) {
-      args.push(this.options.workspacePath);
+      // Use a fixed temp directory name so cleanup is deterministic
+      const tmpDir = os.tmpdir();
+      const fixedDir = path.join(tmpDir, "autotest-workspace");
+      // Remove any previous workspace copy and stale temp dirs
+      try {
+        for (const entry of fs.readdirSync(tmpDir)) {
+          if (entry.startsWith("autotest-ws-") || entry === "autotest-workspace") {
+            fs.rmSync(path.join(tmpDir, entry), { recursive: true, force: true });
+          }
+        }
+      } catch { /* ignore */ }
+
+      this.tempWorkspaceDir = fixedDir;
+      fs.mkdirSync(fixedDir, { recursive: true });
+      const destDir = path.join(fixedDir, path.basename(this.options.workspacePath));
+      fs.cpSync(this.options.workspacePath, destDir, { recursive: true });
+      console.log(`📂 Workspace copied to: ${destDir}`);
+      args.push(destDir);
     }
 
-    // Inject settings.json if provided
-    if (this.options.settings) {
-      const settingsPath = path.join(userDataDir, "User", "settings.json");
-      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-      fs.writeFileSync(settingsPath, JSON.stringify(this.options.settings, null, 2));
-    }
+    // Inject settings.json into the ACTUAL user data dir that VSCode will use (from baseArgs)
+    const actualUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1] ?? userDataDir;
+    const settingsPath = path.join(actualUserDataDir, "User", "settings.json");
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    // Always disable window restoration for test isolation
+    const existingSettings = fs.existsSync(settingsPath)
+      ? JSON.parse(fs.readFileSync(settingsPath, "utf-8"))
+      : {};
+    const settings = {
+      ...existingSettings,
+      "window.restoreWindows": "none",
+      "window.newWindowDimensions": "maximized",
+      ...this.options.settings,
+    };
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
     this.app = await _electron.launch({
       executablePath: vscodePath,
@@ -101,8 +146,8 @@ export class VscodeDriver {
     });
 
     this.page = await this.app.firstWindow();
-    // Wait for VSCode to be ready
-    await this.page.waitForTimeout(5000);
+    // Wait for VSCode workbench to render
+    await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: 30_000 });
   }
 
   async close(): Promise<void> {
@@ -110,6 +155,19 @@ export class VscodeDriver {
       await this.app.close();
       this.app = null;
       this.page = null;
+    }
+    // Clean up temp workspace copy (retry to handle file locks released after process exit)
+    if (this.tempWorkspaceDir) {
+      const dir = this.tempWorkspaceDir;
+      this.tempWorkspaceDir = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+          break;
+        } catch {
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
     }
   }
 
@@ -126,38 +184,79 @@ export class VscodeDriver {
   async runCommandFromPalette(label: string): Promise<void> {
     const page = this.getPage();
     await page.keyboard.press(COMMAND_PALETTE_KEY);
-    await page.waitForTimeout(500);
 
-    const palette = page.getByRole("combobox", { name: "input" });
-    await palette.fill(label);
-    await page.waitForTimeout(500);
+    const palette = page.locator(QUICK_INPUT_SELECTOR);
+    await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    // F1 opens with ">" prefix for command mode — fill() replaces all text,
+    // so we must include ">" to stay in command search mode.
+    await palette.fill(`>${label}`);
+    await page.waitForTimeout(300);
 
-    await page.getByRole("listbox").first().press(ENTER_KEY);
-    await page.waitForTimeout(1000);
+    await page.keyboard.press(ENTER_KEY);
+    // Wait for Quick Input to close
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
-  /** Open a file via Quick Open (Ctrl+P) */
+  /** Open a file via Quick Open (Ctrl+P). Retries if the file indexer isn't ready. */
   async openFile(filePath: string): Promise<void> {
     const page = this.getPage();
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await page.keyboard.press(`${modifier}+P`);
-    await page.waitForTimeout(500);
+    const maxAttempts = 5;
 
-    const input = page.getByRole("combobox", { name: "input" });
-    await input.fill(filePath);
-    await page.waitForTimeout(500);
-    await page.keyboard.press(ENTER_KEY);
-    await page.waitForTimeout(1000);
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await page.keyboard.press(`${modifier}+P`);
+
+      const input = page.locator(QUICK_INPUT_SELECTOR);
+      await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+      await input.fill(filePath);
+      await page.waitForTimeout(500);
+
+      // Check if Quick Open found any results
+      const hasResults = await page.locator(".quick-input-list .monaco-list-row").count() > 0;
+
+      if (hasResults) {
+        await page.keyboard.press(ENTER_KEY);
+        await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+        return;
+      }
+
+      // No results — dismiss and retry after waiting for file indexer
+      await page.keyboard.press("Escape");
+      await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+
+      if (attempt < maxAttempts - 1) {
+        console.log(`   ⏳ Quick Open: no results for "${filePath}", retrying (${attempt + 1}/${maxAttempts})...`);
+        await page.waitForTimeout(3000);
+      }
+    }
+
+    throw new Error(`File not found in Quick Open after ${maxAttempts} attempts: ${filePath}`);
   }
 
   /** Get the content of the active editor */
   async getEditorContent(): Promise<string> {
     const page = this.getPage();
-    return await page.evaluate(() => {
-      // Access VSCode's Monaco editor model
-      const editor = (window as any).monaco?.editor?.getModels?.()?.[0];
-      return editor?.getValue?.() ?? "";
+    // Try Monaco model API first
+    const modelContent = await page.evaluate(() => {
+      const model = (window as any).monaco?.editor?.getModels?.()?.[0];
+      return model?.getValue?.() ?? null;
     });
+    if (modelContent) return modelContent;
+
+    // Fallback: read visible text from editor DOM
+    return await page.locator(".monaco-editor .view-lines").first().innerText().catch(() => "");
+  }
+
+  /** Check if the active editor contains the specified text (checks model + visible DOM) */
+  async editorContains(text: string): Promise<boolean> {
+    const content = await this.getEditorContent();
+    if (content.includes(text)) return true;
+
+    // Fallback: use Playwright's getByText to search visible text in the editor
+    const page = this.getPage();
+    const found = await page.locator(".monaco-editor").getByText(text, { exact: false }).first()
+      .isVisible().catch(() => false);
+    return found;
   }
 
   /** Save the active file (Ctrl+S) */
@@ -166,6 +265,24 @@ export class VscodeDriver {
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await page.keyboard.press(`${modifier}+S`);
     await page.waitForTimeout(500);
+  }
+
+  /** Go to a specific line number (Ctrl+G) */
+  async goToLine(line: number): Promise<void> {
+    const page = this.getPage();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+G`);
+    const input = page.locator(QUICK_INPUT_SELECTOR);
+    await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    // Ctrl+G opens with ":" prefix for line navigation — must preserve it
+    await input.fill(`:${line}`);
+    await page.keyboard.press(ENTER_KEY);
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+  }
+
+  /** Move cursor to end of current line */
+  async goToEndOfLine(): Promise<void> {
+    await this.getPage().keyboard.press("End");
   }
 
   /** Execute a keyboard shortcut */
@@ -177,14 +294,13 @@ export class VscodeDriver {
 
   /** Run a command in the integrated terminal */
   async runInTerminal(command: string): Promise<void> {
-    // Open terminal via command
     await this.runCommandFromPalette("Terminal: Create New Terminal");
-    await this.getPage().waitForTimeout(2000);
-
+    // Wait for terminal to be ready
     const page = this.getPage();
+    await page.locator(".terminal-wrapper").first().waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
     await page.keyboard.type(command);
     await page.keyboard.press(ENTER_KEY);
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(1000);
   }
 
   // ═══════════════════════════════════════════════════════
@@ -192,10 +308,12 @@ export class VscodeDriver {
   // ═══════════════════════════════════════════════════════
 
   /** Activate a side tab by name (e.g., "Explorer", "Extensions", "API Center") */
-  async activeSideTab(tabName: string, timeout = DEFAULT_TIMEOUT): Promise<void> {
+  async activeSideTab(tabName: string): Promise<void> {
     const page = this.getPage();
-    await page.getByRole("tab", { name: tabName }).locator("a").click();
-    await page.waitForTimeout(timeout);
+    const tab = page.getByRole("tab", { name: tabName }).locator("a");
+    await tab.click();
+    // Wait for the corresponding side pane to render
+    await page.waitForTimeout(500);
   }
 
   /** Check if a side tab is visible */
@@ -207,8 +325,10 @@ export class VscodeDriver {
   /** Click a tree item by its display name */
   async clickTreeItem(name: string): Promise<void> {
     const page = this.getPage();
-    await page.getByRole("treeitem", { name }).locator("a").click();
-    await page.waitForTimeout(3000);
+    const item = page.getByRole("treeitem", { name }).locator("a");
+    await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await item.click();
+    await page.waitForTimeout(500);
   }
 
   /** Check if a tree item is visible */
@@ -220,15 +340,19 @@ export class VscodeDriver {
   /** Select an option by name in the Command Palette dropdown */
   async selectPaletteOption(optionText: string): Promise<void> {
     const page = this.getPage();
-    await page.getByRole("option", { name: optionText }).locator("a").click();
-    await page.waitForTimeout(1000);
+    const option = page.getByRole("option", { name: optionText }).locator("a");
+    await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await option.click();
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
   /** Select an option by index in the Command Palette dropdown */
   async selectPaletteOptionByIndex(index: number): Promise<void> {
     const page = this.getPage();
-    await page.getByRole("option").nth(index).locator("a").click();
-    await page.waitForTimeout(1000);
+    const option = page.getByRole("option").nth(index).locator("a");
+    await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await option.click();
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
   /** Get all current notification messages */
@@ -275,15 +399,17 @@ export class VscodeDriver {
   /** Click any element by role and name (generic) */
   async clickByRole(role: string, name: string): Promise<void> {
     const page = this.getPage();
-    await page.getByRole(role as any, { name }).click();
-    await page.waitForTimeout(1000);
+    const el = page.getByRole(role as any, { name });
+    await el.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await el.click();
   }
 
   /** Click any element containing specific text */
   async clickByText(text: string): Promise<void> {
     const page = this.getPage();
-    await page.getByText(text).first().click();
-    await page.waitForTimeout(1000);
+    const el = page.getByText(text).first();
+    await el.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await el.click();
   }
 
   // ═══════════════════════════════════════════════════════
@@ -293,11 +419,34 @@ export class VscodeDriver {
   /** Type text into the active editor at the cursor position */
   async typeInEditor(text: string): Promise<void> {
     const page = this.getPage();
-    // Ensure focus is on the editor
-    await page.locator(".monaco-editor .view-lines").first().click();
+    // Dismiss any active suggest/autocomplete
+    await page.keyboard.press("Escape");
+    // Use Monaco editor API directly to insert text at cursor position.
+    // This completely bypasses keyboard input and autocomplete.
+    const success = await page.evaluate((t) => {
+      const editor = (window as any).monaco?.editor?.getEditors?.()?.[0];
+      if (!editor) return false;
+      const selection = editor.getSelection();
+      if (!selection) return false;
+      const Range = (window as any).monaco.Range;
+      editor.executeEdits("autotest", [{
+        range: new Range(
+          selection.startLineNumber, selection.startColumn,
+          selection.endLineNumber, selection.endColumn
+        ),
+        text: t,
+        forceMoveMarkers: true,
+      }]);
+      return true;
+    }, text);
+
+    if (!success) {
+      // Fallback: insertText at current cursor position.
+      // Don't click .view-lines — it would move the cursor away from where goToLine placed it.
+      await page.keyboard.insertText(text);
+    }
     await page.waitForTimeout(300);
-    await page.keyboard.type(text, { delay: 30 });
-    await page.waitForTimeout(500);
+    await page.keyboard.press("Escape");
   }
 
   /** Select all text in the active editor */
@@ -305,7 +454,6 @@ export class VscodeDriver {
     const page = this.getPage();
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await page.keyboard.press(`${modifier}+A`);
-    await page.waitForTimeout(300);
   }
 
   /** Replace entire editor content with new text */
@@ -313,31 +461,25 @@ export class VscodeDriver {
     await this.selectAllInEditor();
     const page = this.getPage();
     await page.keyboard.press("Delete");
-    await page.waitForTimeout(300);
     await page.keyboard.type(content, { delay: 10 });
-    await page.waitForTimeout(500);
   }
 
   /**
    * Type a snippet trigger word and select the snippet from completion list.
-   * E.g., typeAndTriggerSnippet("class") types "class" and picks the Snippet item.
    */
   async typeAndTriggerSnippet(triggerWord: string): Promise<void> {
     const page = this.getPage();
-    // Ensure focus on editor
-    await page.locator(".monaco-editor .view-lines").first().click();
-    await page.waitForTimeout(300);
+    const editor = page.locator(".monaco-editor .view-lines").first();
+    await editor.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await editor.click();
 
-    // Type the trigger word
     await page.keyboard.type(triggerWord, { delay: 50 });
-    await page.waitForTimeout(1000);
 
-    // Trigger suggestion if not already visible
+    // Trigger suggestion and wait for suggest widget
     await page.keyboard.press(TRIGGER_SUGGEST_KEY);
-    await page.waitForTimeout(1000);
+    await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
 
     // Try to find and select the snippet item
-    // Snippets show with a "Snippet" detail or a specific icon
     const snippetOption = page.locator(
       ".monaco-list-row .suggest-icon.codicon-symbol-snippet"
     ).first();
@@ -346,10 +488,10 @@ export class VscodeDriver {
     if (hasSnippet) {
       await snippetOption.click();
     } else {
-      // Fallback: just press Enter to accept the first suggestion
       await page.keyboard.press(ENTER_KEY);
     }
-    await page.waitForTimeout(1000);
+    // Wait for suggest widget to close
+    await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
   /**
@@ -359,24 +501,19 @@ export class VscodeDriver {
   async waitForLanguageServer(timeoutMs = 120_000): Promise<boolean> {
     const page = this.getPage();
     const start = Date.now();
-    const pollInterval = 3000;
+    const pollInterval = 2000;
 
     while (Date.now() - start < timeoutMs) {
-      // Check for the Java LS status bar item
-      // VSCode Java extension shows a "thumbsup" or checkmark when ready
       const statusText = await this.getStatusBarText();
       const ready =
         statusText.includes("👍") ||
         statusText.includes("✓") ||
         statusText.includes("Ready");
 
-      // Also check via the LS progress — when no "loading" spinner is visible
       const spinner = page.locator(".statusbar-item .codicon-loading, .statusbar-item .codicon-sync~spin");
       const hasSpinner = await spinner.isVisible().catch(() => false);
 
       if (ready || (!hasSpinner && Date.now() - start > 10_000)) {
-        // Give extra time after LS reports ready
-        await page.waitForTimeout(2000);
         return true;
       }
 
@@ -388,83 +525,67 @@ export class VscodeDriver {
 
   /**
    * Get the count of errors and warnings in the Problems panel.
-   * Reads from the status bar badge which shows "N errors, M warnings".
    */
   async getProblemsCount(): Promise<{ errors: number; warnings: number }> {
     const page = this.getPage();
 
-    // Open Problems panel to ensure badge is up to date
-    await this.runCommandFromPalette("View: Toggle Problems");
-    await page.waitForTimeout(1000);
-
-    // Try reading from the status bar "Problems" area
-    const statusText = await this.getStatusBarText();
-
-    // Pattern: "X errors, Y warnings" or similar
-    const errorMatch = statusText.match(/(\d+)\s*error/i);
-    const warningMatch = statusText.match(/(\d+)\s*warning/i);
-
-    if (errorMatch || warningMatch) {
-      return {
-        errors: errorMatch ? parseInt(errorMatch[1], 10) : 0,
-        warnings: warningMatch ? parseInt(warningMatch[1], 10) : 0,
-      };
+    // Strategy 1: read from status bar aria-labels (fast, ~5 elements)
+    const items = page.locator(".statusbar a");
+    const count = await items.count();
+    for (let i = 0; i < count; i++) {
+      const label = await items.nth(i).getAttribute("aria-label") ?? "";
+      const errMatch = label.match(/(\d+)\s*error/i);
+      const warnMatch = label.match(/(\d+)\s*warning/i);
+      if (errMatch || warnMatch) {
+        return {
+          errors: errMatch ? parseInt(errMatch[1], 10) : 0,
+          warnings: warnMatch ? parseInt(warnMatch[1], 10) : 0,
+        };
+      }
     }
 
-    // Fallback: try reading from the panel tab badge
-    const problemsBadge = page.locator(
-      ".panel .action-label[title*='Problems']"
-    );
-    const badgeText = await problemsBadge.textContent().catch(() => "");
-    const countMatch = badgeText?.match(/\d+/);
+    // Strategy 2: open Problems panel and count by icon class
+    await this.runCommandFromPalette("View: Focus Problems (Errors, Warnings, Infos)");
+    await page.waitForTimeout(500);
 
-    // Also try reading the marker count from panel DOM
-    const markers = await page.locator(
-      ".markers-panel .monaco-list-row"
-    ).count().catch(() => 0);
+    const errors = await page.locator(".markers-panel .codicon-error").count().catch(() => 0);
+    const warnings = await page.locator(".markers-panel .codicon-warning").count().catch(() => 0);
 
-    return {
-      errors: countMatch ? parseInt(countMatch[0], 10) : markers,
-      warnings: 0,
-    };
+    // Close the panel focus
+    await page.keyboard.press("Escape");
+
+    return { errors, warnings };
   }
 
   /** Navigate to the next problem (error/warning) in the editor */
   async navigateToNextError(): Promise<void> {
     await this.runCommandFromPalette(NEXT_MARKER_COMMAND);
-    await this.getPage().waitForTimeout(1000);
   }
 
   /** Navigate to a specific error by index (1-based) */
   async navigateToError(index: number): Promise<void> {
-    // First go to the first error, then advance
-    await this.runCommandFromPalette("Go to Next Problem (Error, Warning, Info)");
-    await this.getPage().waitForTimeout(500);
-    for (let i = 1; i < index; i++) {
-      await this.runCommandFromPalette("Go to Next Problem (Error, Warning, Info)");
-      await this.getPage().waitForTimeout(500);
+    for (let i = 0; i < index; i++) {
+      await this.runCommandFromPalette(NEXT_MARKER_COMMAND);
     }
+    // Ensure no leftover UI widgets
+    await this.getPage().keyboard.press("Escape");
   }
 
   /**
    * Trigger Code Action menu at current cursor and select an action by label.
-   * Uses Ctrl+. to open Quick Fix menu, then searches for matching item.
    */
   async applyCodeAction(label: string): Promise<void> {
     const page = this.getPage();
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
-    // Trigger Code Actions
     await page.keyboard.press(`${modifier}+.`);
-    await page.waitForTimeout(1500);
 
-    // Look for the action in the context menu / quick fix list
+    // Wait for code action menu to appear
     const actionItem = page.getByRole("option", { name: label }).first();
-    const visible = await actionItem.isVisible().catch(() => false);
-
-    if (visible) {
+    try {
+      await actionItem.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
       await actionItem.click();
-    } else {
+    } catch {
       // Fallback: type in the filter and press Enter
       const filterInput = page.locator(
         ".context-view .monaco-inputbox input, .quick-input-box input"
@@ -472,12 +593,13 @@ export class VscodeDriver {
       const hasFilter = await filterInput.isVisible().catch(() => false);
       if (hasFilter) {
         await filterInput.fill(label);
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(300);
       }
       await page.keyboard.press(ENTER_KEY);
     }
 
-    await page.waitForTimeout(2000);
+    // Wait for code action to be applied
+    await page.waitForTimeout(1000);
   }
 
   /**
@@ -487,9 +609,10 @@ export class VscodeDriver {
   async triggerCompletion(): Promise<string[]> {
     const page = this.getPage();
     await page.keyboard.press(TRIGGER_SUGGEST_KEY);
-    await page.waitForTimeout(2000);
 
-    // Read completion items from the suggest widget
+    // Wait for suggest widget to appear
+    await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+
     const items = await page.locator(
       ".monaco-list-row .label-name"
     ).allTextContents().catch(() => [] as string[]);
@@ -500,7 +623,7 @@ export class VscodeDriver {
   /** Dismiss the current completion widget */
   async dismissCompletion(): Promise<void> {
     await this.getPage().keyboard.press("Escape");
-    await this.getPage().waitForTimeout(300);
+    await this.getPage().locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
   // ═══════════════════════════════════════════════════════
@@ -548,6 +671,40 @@ export class VscodeDriver {
   /** Read file content */
   async readFile(filePath: string): Promise<string> {
     return fs.readFileSync(filePath, "utf-8");
+  }
+
+  /** Get the workspace root path (temp copy) */
+  getWorkspacePath(): string | null {
+    if (!this.tempWorkspaceDir) return null;
+    const entries = fs.readdirSync(this.tempWorkspaceDir);
+    return entries.length > 0 ? path.join(this.tempWorkspaceDir, entries[0]) : null;
+  }
+
+  /**
+   * Insert a line into a file on disk at the specified line number (1-based).
+   * The file must already be open in the editor. After modifying on disk,
+   * reverts the editor to pick up changes — the LS stays active and re-analyzes quickly.
+   */
+  async insertLineInFile(relativePath: string, lineNumber: number, text: string): Promise<void> {
+    const wsPath = this.getWorkspacePath();
+    if (!wsPath) throw new Error("No workspace path available");
+
+    const filePath = path.join(wsPath, relativePath);
+    if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
+
+    // Modify file on disk
+    const lines = fs.readFileSync(filePath, "utf-8").split("\n");
+    lines.splice(lineNumber - 1, 0, text);
+    fs.writeFileSync(filePath, lines.join("\n"));
+    console.log(`   📝 Inserted line ${lineNumber} in ${relativePath}`);
+
+    // Revert editor to pick up the on-disk changes (LS stays active)
+    await this.runCommandFromPalette("File: Revert File");
+  }
+
+  /** Revert the current file to its on-disk state */
+  async revertFile(): Promise<void> {
+    await this.runCommandFromPalette("File: Revert File");
   }
 
   /** Wait for a specified duration (seconds) */
