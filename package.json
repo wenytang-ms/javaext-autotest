@@ -1,18 +1,45 @@
 {
   "name": "vscode-autotest",
   "version": "0.1.0",
-  "description": "AI-driven VSCode extension E2E testing framework",
+  "description": "AI-driven VSCode extension E2E testing framework — YAML test plans + Playwright + LLM verification",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "autotest": "dist/cli/index.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "keywords": [
+    "vscode",
+    "testing",
+    "e2e",
+    "playwright",
+    "java",
+    "language-server",
+    "automation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wenytang-ms/javaext-autotest.git"
+  },
+  "homepage": "https://github.com/wenytang-ms/javaext-autotest#readme",
+  "bugs": {
+    "url": "https://github.com/wenytang-ms/javaext-autotest/issues"
+  },
+  "license": "MIT",
+  "author": "vscjava",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest",
     "lint": "eslint src/",
+    "prepublishOnly": "npm run build",
     "run:test-plan": "tsx src/cli/index.ts run",
     "run:all": "npm run build && node -e \"const{readdirSync}=require('fs'),{execSync}=require('child_process');readdirSync('test-plans').filter(f=>f.endsWith('.yaml')).forEach(f=>{console.log('\\n=== '+f+' ===');try{execSync('npx autotest run test-plans/'+f,{stdio:'inherit'})}catch{}})\""
   },

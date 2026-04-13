@@ -1,0 +1,20 @@
+# Source (dist/ is published via files field)
+src/
+tsconfig.json
+
+# Test artifacts
+test-plans/
+test-results/
+screenshots/
+results*.json
+
+# Dev files
+.vscode-test/
+docs/
+AGENTS.md
+dump-*.ts
+*.tsbuildinfo
+
+# Git
+.git/
+.gitignore
