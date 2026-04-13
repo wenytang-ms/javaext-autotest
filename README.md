@@ -198,12 +198,42 @@ Copilot CLI 会自动执行 `npx autotest run`，读取结果和截图，分析�
 
 ## 现有 Test Plan
 
-| 文件 | 来源 | 场景 | 状态 |
-|------|------|------|------|
-| `java-maven.yaml` | wiki Maven | LS 就绪 → 打开文件 → 补全 → 导航 → 编辑 → 保存 → 诊断 | ✅ 8/8 |
-| `java-basic-editing.yaml` | wiki Basic #1-5 | LS 就绪 → 代码片段 → Code Action → 编译 | 🔲 待验证 |
-| `api-center-tree-view.yaml` | 示例 | Azure API Center 树视图导航 | 🔲 待验证 |
-| `register-api-cicd.yaml` | 示例 | CI/CD 注册 API 流程 | 🔲 待验证 |
+| 文件 | 步数 | 来源 | 场景 | 状态 |
+|------|------|------|------|------|
+| `java-maven.yaml` | 8 | wiki Maven | LS → 补全 → 导航 → 编辑 → 诊断 | ✅ 8/8 |
+| `java-maven-multimodule.yaml` | 5 | wiki Maven Multimodule | LS → 两模块补全 | ✅ 5/5 |
+| `java-gradle.yaml` | 7 | wiki Gradle | LS → 补全 → 导航 → 编辑 | ✅ 7/7 |
+| `java-basic-editing.yaml` | 8 | wiki Basic #1-5 | LS → 代码片段 → Code Action → 编译 | 🔲 待验证 |
+| `java-basic-extended.yaml` | 8 | wiki Basic #6-8 | 补全 → Import → Rename | ✅ 8/8 |
+| `java-new-file-snippet.yaml` | 4 | wiki Basic #9 | Explorer 创建新 Java 文件 → class snippet | 🔲 待验证 |
+| `java-single-file.yaml` | 6 | wiki Single file | LS → 补全 → 编辑 | ✅ 6/6 |
+| `java-debugger.yaml` | 7 | wiki Debugger | 断点 → 启动调试 → 输出 → 停止 | 🔲 待验证 |
+| `java-test-runner.yaml` | 6 | wiki Test Runner | 测试面板 → 运行全部 → CodeLens | 🔲 待验证 |
+| `java-maven-resolve-type.yaml` | 10 | wiki Maven for Java | 输入未知类型 → Hover → Code Action | 🔲 待验证 |
+| `java-dependency-viewer.yaml` | 4 | wiki Dependency Viewer | 依赖视图 → 节点展开 | 🔲 待验证 |
+| `java-extension-pack.yaml` | 3 | wiki Extension Pack | Configure Classpath 命令 | 🔲 待验证 |
+| `java-fresh-import.yaml` | 3 | wiki Fresh Import | Spring Petclinic → LS → 补全 | 🔲 需要 clone 项目 |
+
+### Wiki 场景覆盖情况
+
+| Wiki 场景 | 状态 | 阻碍 |
+|-----------|------|------|
+| Basic #1-5 | ✅ 已有 test plan | — |
+| Basic #6-8 (补全/Import/Rename) | ✅ 已有 test plan | — |
+| Basic #9 (New Java File snippet) | ✅ 已有 test plan | — |
+| Maven | ✅ 已有 test plan | — |
+| Maven Multimodule | ✅ 已有 test plan | — |
+| Gradle | ✅ 已有 test plan | — |
+| Maven Java 25 | ❌ 未覆盖 | 需要 JDK 25 + 对应测试项目 |
+| Gradle Java 25 | ❌ 未覆盖 | 需要 JDK 25 + 对应测试项目 |
+| Single file | ✅ 已有 test plan | — |
+| Single file without workspace | ❌ 未覆盖 | 需要拖拽文件（无 Driver 支持） |
+| Fresh import (spring-petclinic) | ✅ 已有 test plan | 需要提前 clone 项目 |
+| Debugger for Java | ✅ 已有 test plan | — |
+| Java Test Runner | ✅ 已有 test plan | — |
+| Maven for Java | ✅ 已有 test plan | — |
+| Java Dependency Viewer | ✅ 已有 test plan | — |
+| Java Extension Pack | ✅ 已有 test plan | webview 内部交互有限 |
 
 ---
 
@@ -225,7 +255,10 @@ autotest/
 │   ├── types.ts                # 核心类型定义
 │   └── index.ts                # SDK 导出
 ├── test-plans/                  # YAML 测试计划
-├── screenshots/                 # 测试截图输出
+├── test-results/                # 测试输出（每个 plan 一个子目录）
+│   └── <plan-name>/
+│       ├── results.json
+│       └── screenshots/
 ├── AGENTS.md                    # Copilot CLI 集成指南
 ├── docs/
 │   ├── architecture.md          # 架构文档

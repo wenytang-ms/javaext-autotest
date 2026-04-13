@@ -14,8 +14,8 @@ import { LLMClient } from "./llmClient.js";
 import { StepVerifier } from "./stepVerifier.js";
 
 export interface TestRunnerOptions {
-  /** Directory to save screenshots. If set, screenshots are taken before/after each step. */
-  screenshotDir?: string;
+  /** Output directory for this test run. Contains screenshots/ and results.json. */
+  outputDir?: string;
   /** Disable LLM verification (auto-pass all `verify` fields). */
   noLLM?: boolean;
 }
@@ -25,11 +25,14 @@ export class TestRunner {
   private plan: TestPlan;
   private actionResolver: ActionResolver;
   private verifier: StepVerifier;
+  private outputDir: string | null;
   private screenshotDir: string | null;
+  private screenshotCounter = 0;
 
   constructor(plan: TestPlan, options: TestRunnerOptions = {}) {
     this.plan = plan;
-    this.screenshotDir = options.screenshotDir ?? null;
+    this.outputDir = options.outputDir ?? null;
+    this.screenshotDir = this.outputDir ? path.join(this.outputDir, "screenshots") : null;
 
     this.driver = new VscodeDriver({
       vscodeVersion: plan.setup.vscodeVersion,
@@ -56,13 +59,14 @@ export class TestRunner {
     const startTime = new Date();
     const results: StepResult[] = [];
 
-    // Prepare screenshot directory — clean stale screenshots from previous runs
-    if (this.screenshotDir) {
-      if (fs.existsSync(this.screenshotDir)) {
-        fs.rmSync(this.screenshotDir, { recursive: true, force: true });
+    // Prepare output directory — clean stale data from previous runs
+    if (this.outputDir) {
+      if (fs.existsSync(this.outputDir)) {
+        fs.rmSync(this.outputDir, { recursive: true, force: true });
       }
-      fs.mkdirSync(this.screenshotDir, { recursive: true });
-      console.log(`📸 Screenshots → ${this.screenshotDir}`);
+      fs.mkdirSync(this.outputDir, { recursive: true });
+      fs.mkdirSync(this.screenshotDir!, { recursive: true });
+      console.log(`📂 Output → ${this.outputDir}`);
     }
 
     try {
@@ -70,9 +74,8 @@ export class TestRunner {
       await this.driver.launch();
       console.log(`✅ VSCode ready\n`);
 
-      // Wait for extension to load
-      const extTimeout = this.plan.setup.timeout ?? 10;
-      await this.driver.wait(extTimeout);
+      // Brief wait for UI to settle (not the full setup.timeout — that's for LS steps)
+      await this.driver.wait(3);
 
       for (const step of this.plan.steps) {
         const result = await this.executeStep(step);
@@ -101,7 +104,7 @@ export class TestRunner {
 
     console.log(`\n📊 Results: ${summary.passed}/${summary.total} passed`);
 
-    return {
+    const report: TestReport = {
       planName: this.plan.name,
       startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
@@ -109,6 +112,15 @@ export class TestRunner {
       results,
       summary,
     };
+
+    // Save results.json into output directory
+    if (this.outputDir) {
+      const reportPath = path.join(this.outputDir, "results.json");
+      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+      console.log(`📄 Report → ${reportPath}`);
+    }
+
+    return report;
   }
 
   private async executeStep(step: TestStep): Promise<StepResult> {
@@ -129,10 +141,6 @@ export class TestRunner {
 
       // Delegate verification to StepVerifier (pass screenshot for LLM)
       const verifyResult = await this.verifier.verify(step, afterPath);
-
-      if (verifyResult.passed) {
-        this.removeScreenshot(beforePath);
-      }
 
       return {
         stepId: step.id,
@@ -156,16 +164,11 @@ export class TestRunner {
     }
   }
 
-  private removeScreenshot(filePath: string | undefined): void {
-    if (filePath) {
-      try { fs.unlinkSync(filePath); } catch { /* ignore */ }
-    }
-  }
-
   private async takeScreenshot(stepId: string, phase: "before" | "after" | "error"): Promise<string | undefined> {
     if (!this.screenshotDir) return undefined;
     try {
-      const fileName = `${stepId}_${phase}.png`;
+      const seq = String(++this.screenshotCounter).padStart(2, "0");
+      const fileName = `${seq}_${stepId}_${phase}.png`;
       const filePath = path.join(this.screenshotDir, fileName);
       await this.driver.screenshot(filePath);
       return filePath;

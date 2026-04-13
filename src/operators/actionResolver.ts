@@ -84,23 +84,24 @@ export class ActionResolver {
         handler: async () => { await d.saveFile(); },
       },
       {
-        regex: /(?:insertLineInFile|在文件中插入行)\s+(\S+)\s+(\d+)\s+(.+)/i,
+        regex: /(?:insertLineInFile|在文件中插入行)\s+(\S+)\s+(\d+)\s+([\s\S]+)/i,
         handler: async (m) => {
-          await d.insertLineInFile(m[1], parseInt(m[2], 10), m[3]);
+          await d.insertLineInFile(m[1], parseInt(m[2], 10), m[3].trim());
         },
       },
 
       // ── Wait ──
-      {
-        regex: /(?:等待|wait)\s*(?:(\d+)\s*(?:秒|seconds?|s))?/i,
-        handler: async (m) => { await d.wait(parseInt(m[1] ?? "3", 10)); },
-      },
+      // IMPORTANT: waitForLanguageServer must be before generic "wait" pattern
       {
         regex: /(?:waitForLanguageServer|等待语言服务器)/i,
         handler: async () => {
           const ready = await d.waitForLanguageServer(lsTimeout);
           if (!ready) throw new Error("Language Server did not become ready within timeout");
         },
+      },
+      {
+        regex: /(?:等待|wait)\s*(?:(\d+)\s*(?:秒|seconds?|s))?/i,
+        handler: async (m) => { await d.wait(parseInt(m[1] ?? "3", 10)); },
       },
 
       // ── Cursor Navigation ──
@@ -141,6 +142,72 @@ export class ActionResolver {
       {
         regex: /(?:triggerCompletionAt|在位置触发补全)\s+(.+)/i,
         handler: async () => { await d.triggerCompletion(); },
+      },
+
+      // ── Debugging ──
+      {
+        regex: /(?:startDebugSession|启动调试)/i,
+        handler: async () => { await d.startDebugSession(); },
+      },
+      {
+        regex: /(?:stopDebugSession|停止调试)/i,
+        handler: async () => { await d.stopDebugSession(); },
+      },
+      {
+        regex: /(?:setBreakpoint|设置断点)\s+(\d+)/i,
+        handler: async (m) => { await d.setBreakpoint(parseInt(m[1], 10)); },
+      },
+      {
+        regex: /(?:debugStepOver|单步跳过)/i,
+        handler: async () => { await d.debugStepOver(); },
+      },
+      {
+        regex: /(?:debugStepInto|单步进入)/i,
+        handler: async () => { await d.debugStepInto(); },
+      },
+      {
+        regex: /(?:debugStepOut|单步跳出)/i,
+        handler: async () => { await d.debugStepOut(); },
+      },
+
+      // ── Test Runner ──
+      {
+        regex: /(?:openTestExplorer|打开测试面板)/i,
+        handler: async () => { await d.openTestExplorer(); },
+      },
+      {
+        regex: /(?:runAllTests|运行全部测试)/i,
+        handler: async () => { await d.runAllTests(); },
+      },
+      {
+        regex: /(?:clickCodeLens|点击CodeLens)\s+(.+)/i,
+        handler: async (m) => { await d.clickCodeLens(m[1].trim()); },
+      },
+
+      // ── Hover ──
+      {
+        regex: /(?:hoverOnText|悬停在)\s+(.+)/i,
+        handler: async (m) => { await d.hoverOnText(m[1].trim()); },
+      },
+      {
+        regex: /(?:dismissHover|关闭悬停)/i,
+        handler: async () => { await d.dismissHover(); },
+      },
+
+      // ── File Explorer ──
+      {
+        regex: /(?:createNewFile|创建文件)\s+(\S+)\s+(\S+)/i,
+        handler: async (m) => { await d.createNewFileViaExplorer(m[1], m[2]); },
+      },
+      {
+        regex: /(?:contextMenu|右键菜单)\s+(\S+)\s+(.+)/i,
+        handler: async (m) => { await d.contextMenuOnTreeItem(m[1], m[2].trim()); },
+      },
+
+      // ── Dependency tree ──
+      {
+        regex: /(?:openDependencyExplorer|打开依赖视图)/i,
+        handler: async () => { await d.openDependencyExplorer(); },
       },
     ];
   }

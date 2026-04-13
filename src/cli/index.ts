@@ -25,21 +25,22 @@ program
   .description("Execute a test plan against VSCode")
   .option("--attach <port>", "Connect to an existing VSCode via CDP port")
   .option("--interactive", "Step-by-step execution with manual confirmation")
-  .option("--output <path>", "Output report file path")
-  .option("--screenshots <dir>", "Directory to save step screenshots (default: ./screenshots)")
+  .option("--output <dir>", "Output directory (default: ./test-results/<plan-name>)")
   .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; screenshots?: string; llm?: boolean }) => {
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean }) => {
     try {
       const plan = loadTestPlan(planPath);
       console.log(`📋 Test Plan: ${plan.name}`);
       console.log(`   Extension: ${plan.setup.extension}`);
       console.log(`   Steps: ${plan.steps.length}`);
 
-      const screenshotDir = opts.screenshots
-        ? path.resolve(opts.screenshots)
-        : path.resolve("screenshots");
+      // Derive output dir from plan file name: test-results/<plan-name>/
+      const planName = path.basename(planPath, path.extname(planPath));
+      const outputDir = opts.output
+        ? path.resolve(opts.output)
+        : path.resolve("test-results", planName);
 
-      const runner = new TestRunner(plan, { screenshotDir, noLLM: opts.llm === false });
+      const runner = new TestRunner(plan, { outputDir, noLLM: opts.llm === false });
 
       // Ensure VSCode is closed even if the process is interrupted (Ctrl+C)
       const cleanup = async () => {
@@ -52,17 +53,8 @@ program
 
       const report = await runner.run();
 
-      // Output report
-      if (opts.output) {
-        const outputPath = path.resolve(opts.output);
-        fs.writeFileSync(outputPath, JSON.stringify(report, null, 2));
-        console.log(`\n📄 Report saved to: ${outputPath}`);
-      } else {
-        console.log(`\n📄 Report:\n${JSON.stringify(report.summary, null, 2)}`);
-      }
-
       // Exit code based on results
-      process.exit(report.summary.failed > 0 ? 1 : 0);
+      process.exit(report.summary.failed + report.summary.errors > 0 ? 1 : 0);
     } catch (e) {
       console.error(`❌ Error: ${(e as Error).message}`);
       process.exit(1);

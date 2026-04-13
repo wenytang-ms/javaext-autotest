@@ -13,7 +13,8 @@
     "dev": "tsc --watch",
     "test": "vitest",
     "lint": "eslint src/",
-    "run:test-plan": "tsx src/cli/index.ts run"
+    "run:test-plan": "tsx src/cli/index.ts run",
+    "run:all": "npm run build && node -e \"const{readdirSync}=require('fs'),{execSync}=require('child_process');readdirSync('test-plans').filter(f=>f.endsWith('.yaml')).forEach(f=>{console.log('\\n=== '+f+' ===');try{execSync('npx autotest run test-plans/'+f,{stdio:'inherit'})}catch{}})\""
   },
   "dependencies": {
     "@azure/openai": "^2.0.0",

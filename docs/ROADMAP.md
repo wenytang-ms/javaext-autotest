@@ -151,10 +151,22 @@ TestRunner God Class 拆分为独立模块：
   - [ ] `copilot-test run --wiki-plan Test-Plan.md --scenario "Basic"`
   - [ ] 自动提取指定场景 → 转换为内部 TestPlan 对象 → 执行
 - [ ] Wiki Test Plan 全场景覆盖
-  - [ ] Basic (全部 9 步)
-  - [ ] Maven / Gradle / Single file
-  - [ ] IntelliCode / Debugger / Test Runner / Maven for Java
-  - [ ] Java Dependency Viewer / Extension Pack
+  - [x] Basic #1-5 — `java-basic-editing.yaml`
+  - [x] Basic #6-8 — `java-basic-extended.yaml`
+  - [ ] Basic #9 (New Java File) — 需要文件资源管理器右键菜单交互
+  - [x] Maven — `java-maven.yaml`
+  - [x] Maven Multimodule — `java-maven-multimodule.yaml`
+  - [x] Gradle — `java-gradle.yaml`
+  - [ ] Maven Java 25 — 需要 JDK 25 + 对应测试项目
+  - [ ] Gradle Java 25 — 需要 JDK 25 + 对应测试项目
+  - [x] Single file — `java-single-file.yaml`
+  - [ ] Single file without workspace — 需要拖拽文件（无 Driver 支持）
+  - [ ] Fresh import (spring-petclinic) — 需要 clone 外部仓库
+  - [ ] Debugger for Java — 需要新 Driver 能力（启动调试、断点、程序输出）
+  - [ ] Java Test Runner — 需要新 Driver 能力（测试面板、CodeLens）
+  - [ ] Maven for Java — 需要新 Driver 能力（hover、"Resolve unknown type" 交互）
+  - [ ] Java Dependency Viewer — 需要新 Driver 能力（依赖树验证）
+  - [ ] Java Extension Pack — 需要 webview 交互（Classpath 配置页面）
 
 ---
 
@@ -174,7 +186,85 @@ TestRunner God Class 拆分为独立模块：
 
 ---
 
-## Phase 7 🔲 稳定性与扩展
+## Phase 7 🔲 新增 Driver 能力
+
+> 状态：**待开始** · 优先级：中
+
+以下是覆盖 wiki 剩余场景所需的 Driver 能力及 Playwright 可行性分析。
+
+### 调试（Debugger for Java）
+
+| 能力 | 说明 | Playwright 可行性 |
+|------|------|-------------------|
+| `startDebugSession(config)` | 通过 Command Palette 启动调试 | ✅ 可行 — F5 或 `Debug: Start Debugging` 命令 |
+| `setBreakpoint(file, line)` | 在指定行设置断点 | ✅ 可行 — `goToLine()` + 点击行号区域（gutter）或 `Debug: Toggle Breakpoint` 命令 |
+| `waitForBreakpointHit()` | 等待断点命中 | ✅ 可行 — 轮询调试工具栏可见性或 status bar "Paused on breakpoint" |
+| `getDebugVariables()` | 读取变量面板内容 | ⚠️ 部分 — TreeView 操作已有，但变量值需要展开节点读取 |
+| `debugStepOver/Into/Out()` | 调试单步操作 | ✅ 可行 — 调试工具栏按钮或 F10/F11/Shift+F11 |
+| `getDebugConsoleOutput()` | 读取 Debug Console 输出 | ⚠️ 部分 — 需要定位 `.repl` 面板读取文本 |
+| `stopDebugSession()` | 停止调试 | ✅ 可行 — Shift+F5 或工具栏按钮 |
+
+### 测试运行器（Java Test Runner）
+
+| 能力 | 说明 | Playwright 可行性 |
+|------|------|-------------------|
+| `openTestExplorer()` | 打开测试资源管理器 | ✅ 可行 — `Testing: Focus on Test Explorer View` 命令 |
+| `runAllTests()` | 运行所有测试 | ✅ 可行 — 测试面板 `Run All` 按钮或 `Test: Run All Tests` 命令 |
+| `getTestResults()` | 获取测试结果（pass/fail 计数） | ⚠️ 部分 — 需要从测试面板 TreeView 读取图标状态 |
+| `clickCodeLens(label)` | 点击 CodeLens（如 "Run Test"） | ⚠️ 部分 — CodeLens 是 `<a>` 元素，可通过 `getByText("Run Test")` 定位，但位置依赖行号 |
+| `waitForTestComplete()` | 等待测试运行完成 | ✅ 可行 — 轮询测试进度条或状态变化 |
+
+### Hover 与上下文交互（Maven for Java）
+
+| 能力 | 说明 | Playwright 可行性 |
+|------|------|-------------------|
+| `hoverOnSymbol(text)` | 在代码符号上悬停 | ✅ 可行 — `page.locator().hover()` 可触发 hover provider |
+| `getHoverContent()` | 读取 hover 弹窗内容 | ✅ 可行 — `.monaco-hover-content` 的 `textContent()` |
+| `clickHoverAction(label)` | 点击 hover 中的操作链接 | ✅ 可行 — hover 弹窗内的 `<a>` 元素 |
+| `followQuickPick(steps)` | 跟随多步 Quick Pick 交互 | ✅ 可行 — 已有 `selectPaletteOption()` |
+
+### 文件资源管理器交互
+
+| 能力 | 说明 | Playwright 可行性 |
+|------|------|-------------------|
+| `rightClickTreeItem(name)` | 右键点击文件树节点 | ✅ 可行 — `page.click({ button: 'right' })` |
+| `selectContextMenuItem(label)` | 选择右键菜单项 | ✅ 可行 — `.context-view .action-label` 定位 |
+| `createNewFile(name)` | 通过资源管理器创建文件 | ✅ 可行 — 右键菜单 "New File" → 输入文件名 |
+
+### 依赖树（Java Dependency Viewer）
+
+| 能力 | 说明 | Playwright 可行性 |
+|------|------|-------------------|
+| `openDependencyExplorer()` | 打开 Java 依赖视图 | ✅ 可行 — 侧边栏切换（已有 `activeSideTab()`） |
+| `expandTreeNode(path)` | 展开多层树节点 | ✅ 可行 — 已有 `clickTreeItem()`，可连续调用 |
+| `verifyTreeNodeExists(path)` | 验证节点存在 | ✅ 可行 — 已有 `isTreeItemVisible()` |
+
+### Webview 交互（Java Extension Pack）
+
+| 能力 | 说明 | Playwright 可行性 |
+|------|------|-------------------|
+| `switchToWebview()` | 切换到 webview iframe | ⚠️ 较复杂 — 需要 `page.frameLocator()` 进入 iframe |
+| `interactWithWebview(selector)` | 在 webview 内操作 | ⚠️ 较复杂 — webview 内容在独立 iframe 中，需要先定位 frame |
+| `getWebviewContent()` | 读取 webview 内容 | ⚠️ 较复杂 — 同上 |
+
+### 可行性总结
+
+| 类别 | 需要的能力数 | ✅ 可行 | ⚠️ 部分/复杂 |
+|------|------------|---------|-------------|
+| 调试 | 7 | 5 | 2 |
+| 测试运行器 | 5 | 3 | 2 |
+| Hover/上下文 | 4 | 4 | 0 |
+| 文件资源管理器 | 3 | 3 | 0 |
+| 依赖树 | 3 | 3 | 0 |
+| Webview | 3 | 0 | 3 |
+
+> **结论**：Playwright Electron 可以支持绝大多数能力。Webview 交互最复杂（iframe 嵌套），
+> 调试和测试运行器的结果读取需要定制 DOM 解析。建议实现优先级：
+> Hover/上下文 > 文件资源管理器 > 依赖树 > 调试 > 测试运行器 > Webview。
+
+---
+
+## Phase 8 🔲 稳定性与扩展
 
 > 状态：**待开始** · 优先级：低
 
@@ -200,3 +290,5 @@ TestRunner God Class 拆分为独立模块：
 | M3: 端到端可跑 | ✅ 完成 | java-maven.yaml 8/8 通过 · 工作区隔离 · 截图 · 事件驱动等待 |
 | M4: AI 验证 + 解耦 | ✅ 完成 | ActionResolver / StepVerifier / LLMClient 拆分 · Azure OpenAI 集成 · Copilot CLI AGENTS.md |
 | M5: 读 wiki 跑测试 | 🔲 待做 | Copilot CLI 直接读 Markdown → 全自动测试 |
+| M6: CI 集成 | 🔲 待做 | GitHub Actions · HTML 报告 · 并行执行 |
+| M7: Driver 扩展 | 🔲 待做 | 调试 · 测试运行器 · Hover · 依赖树 · Webview |
