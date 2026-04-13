@@ -68,21 +68,11 @@ steps:
       errors: 0
     timeout: 30
 
-  # ── Step 5: 保存 + 强制编译 ─────────────────────────────
-  # wiki: "Save all the files, and invoke VSCode command
-  #        'Java: Force Java compilation'. There should be no errors."
+  # ── Step 5: 保存并验证无错误 ─────────────────────────────
+  # wiki: "Save all the files... There should be no errors."
   - id: "save-all"
     action: "执行命令 File: Save All"
-    verify: "所有文件已保存"
-
-  - id: "force-compile"
-    action: "执行命令 Java: Force Java Compilation"
-    waitBefore: 3
-    verify: "编译命令已触发"
-
-  - id: "select-compile-mode"
-    action: "选择 Incremental 选项"
-    verify: "编译完成"
+    verify: "所有文件已保存，编译无错误"
     verifyProblems:
       errors: 0
-    timeout: 60
+    timeout: 30

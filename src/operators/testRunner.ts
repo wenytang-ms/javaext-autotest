@@ -7,8 +7,9 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execSync } from "node:child_process";
 import { VscodeDriver } from "../drivers/vscodeDriver.js";
-import type { StepResult, TestPlan, TestReport, TestStep } from "../types.js";
+import type { RepoClone, StepResult, TestPlan, TestReport, TestStep } from "../types.js";
 import { ActionResolver } from "./actionResolver.js";
 import { LLMClient } from "./llmClient.js";
 import { StepVerifier } from "./stepVerifier.js";
@@ -39,6 +40,7 @@ export class TestRunner {
       extensionPath: plan.setup.extensionPath,
       extensions: plan.setup.extensions,
       workspacePath: plan.setup.workspace,
+      filePath: plan.setup.file,
       settings: plan.setup.settings,
     });
 
@@ -70,6 +72,11 @@ export class TestRunner {
     }
 
     try {
+      // Clone required repos if specified
+      if (this.plan.setup.repos?.length) {
+        await this.cloneRepos(this.plan.setup.repos);
+      }
+
       console.log(`\n🚀 Launching VSCode for: ${this.plan.name}`);
       await this.driver.launch();
       console.log(`✅ VSCode ready\n`);
@@ -167,6 +174,8 @@ export class TestRunner {
   private async takeScreenshot(stepId: string, phase: "before" | "after" | "error"): Promise<string | undefined> {
     if (!this.screenshotDir) return undefined;
     try {
+      // Dismiss notifications before every screenshot for clean captures
+      await this.driver.dismissAllNotifications();
       const seq = String(++this.screenshotCounter).padStart(2, "0");
       const fileName = `${seq}_${stepId}_${phase}.png`;
       const filePath = path.join(this.screenshotDir, fileName);
@@ -174,6 +183,31 @@ export class TestRunner {
       return filePath;
     } catch {
       return undefined;
+    }
+  }
+
+  private async cloneRepos(repos: RepoClone[]): Promise<void> {
+    for (const repo of repos) {
+      // Derive local path from URL if not specified
+      const repoName = repo.url.replace(/\.git$/, "").split("/").pop() ?? "repo";
+      const targetPath = repo.path ?? path.resolve(repoName);
+
+      if (fs.existsSync(targetPath)) {
+        console.log(`📦 Repo already exists: ${targetPath}`);
+        continue;
+      }
+
+      console.log(`📦 Cloning ${repo.url} → ${targetPath}`);
+      const branchArg = repo.branch ? `--branch ${repo.branch}` : "";
+      try {
+        execSync(`git clone --depth 1 ${branchArg} ${repo.url} "${targetPath}"`, {
+          stdio: "pipe",
+          timeout: 120_000,
+        });
+        console.log(`📦 Clone complete`);
+      } catch (e) {
+        throw new Error(`Failed to clone ${repo.url}: ${(e as Error).message.slice(0, 200)}`);
+      }
     }
   }
 }

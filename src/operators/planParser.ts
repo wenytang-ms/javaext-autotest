@@ -5,7 +5,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import yaml from "js-yaml";
-import type { TestPlan, TestStep } from "../types.js";
+import type { RepoClone, TestPlan, TestStep } from "../types.js";
 
 export function loadTestPlan(filePath: string): TestPlan {
   const absolutePath = path.resolve(filePath);
@@ -69,6 +69,10 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       workspace: setup.workspace
         ? path.resolve(planDir, setup.workspace as string)
         : undefined,
+      file: setup.file
+        ? path.resolve(planDir, setup.file as string)
+        : undefined,
+      repos: parseRepos(setup.repos, planDir),
       settings: setup.settings as Record<string, unknown> | undefined,
       timeout: setup.timeout as number | undefined,
     },
@@ -86,4 +90,13 @@ export function validateTestPlanFile(filePath: string): { valid: boolean; errors
     errors.push((e as Error).message);
     return { valid: false, errors };
   }
+}
+
+function parseRepos(raw: unknown, planDir: string): RepoClone[] | undefined {
+  if (!raw || !Array.isArray(raw)) return undefined;
+  return raw.map((r: Record<string, unknown>) => ({
+    url: r.url as string,
+    path: r.path ? path.resolve(planDir, r.path as string) : undefined,
+    branch: r.branch as string | undefined,
+  }));
 }

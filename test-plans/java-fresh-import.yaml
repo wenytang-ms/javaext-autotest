@@ -3,20 +3,17 @@
 # 来源: wiki Test-Plan.md "Fresh import" 场景
 # 验证: 克隆并打开 Spring Petclinic → LS 就绪 → 补全正常
 #
-# 注意: 此 test plan 需要提前 clone spring-petclinic 到本地。
-#   git clone https://github.com/spring-projects/spring-petclinic ../spring-petclinic
-#
 # 前置条件:
-#   - spring-petclinic 已 clone 到 ../spring-petclinic
 #   - JDK 已安装且可用
 #   - Maven 已安装
+#   - Git 已安装（用于自动 clone）
 #
 # 用法: autotest run test-plans/java-fresh-import.yaml
 
 name: "Java Fresh Import — Spring Petclinic"
 description: |
   对应 wiki Test Plan 的 Fresh Import 场景:
-  打开新克隆的 Spring Petclinic 项目，
+  自动 clone Spring Petclinic 项目，
   验证语言服务器正常启动，基本补全功能正常。
 
 setup:
@@ -24,6 +21,9 @@ setup:
   extensions:
     - "vscjava.vscode-java-pack"
   vscodeVersion: "stable"
+  repos:
+    - url: "https://github.com/spring-projects/spring-petclinic"
+      path: "../../spring-petclinic"
   workspace: "../../spring-petclinic"
   timeout: 300  # 大型 Maven 项目导入可能很慢
 

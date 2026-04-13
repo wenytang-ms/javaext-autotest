@@ -17,9 +17,23 @@ export interface TestSetup {
   /** Marketplace extensions to install before launch (e.g. ["vscjava.vscode-java-pack"]) */
   extensions?: string[];
   vscodeVersion?: "stable" | "insiders";
+  /** Workspace folder to open. Mutually exclusive with `file`. */
   workspace?: string;
+  /** Single file to open (no workspace). For testing LS in no-workspace mode. */
+  file?: string;
+  /** Git repos to clone before running. Each entry: { url, path?, branch? } */
+  repos?: RepoClone[];
   settings?: Record<string, unknown>;
   timeout?: number;
+}
+
+export interface RepoClone {
+  /** Git clone URL */
+  url: string;
+  /** Local path to clone into (relative to plan file). If omitted, derived from repo name. */
+  path?: string;
+  /** Branch or tag to checkout */
+  branch?: string;
 }
 
 export interface TestStep {
@@ -90,6 +104,8 @@ export interface VscodeDriverOptions {
   /** Marketplace extension IDs to install before launch */
   extensions?: string[];
   workspacePath?: string;
+  /** Single file to open (no workspace) */
+  filePath?: string;
   userDataDir?: string;
   settings?: Record<string, unknown>;
   launchArgs?: string[];

@@ -127,6 +127,17 @@ export class VscodeDriver {
       fs.cpSync(this.options.workspacePath, destDir, { recursive: true });
       console.log(`📂 Workspace copied to: ${destDir}`);
       args.push(destDir);
+    } else if (this.options.filePath) {
+      // Single file mode — copy the file to a temp dir and open it directly
+      const tmpDir = os.tmpdir();
+      const fixedDir = path.join(tmpDir, "autotest-workspace");
+      if (fs.existsSync(fixedDir)) fs.rmSync(fixedDir, { recursive: true, force: true });
+      fs.mkdirSync(fixedDir, { recursive: true });
+      const destFile = path.join(fixedDir, path.basename(this.options.filePath));
+      fs.copyFileSync(this.options.filePath, destFile);
+      this.tempWorkspaceDir = fixedDir;
+      console.log(`📄 File copied to: ${destFile}`);
+      args.push(destFile);
     }
 
     // Inject settings.json into the ACTUAL user data dir that VSCode will use (from baseArgs)
@@ -141,6 +152,17 @@ export class VscodeDriver {
       ...existingSettings,
       "window.restoreWindows": "none",
       "window.newWindowDimensions": "maximized",
+      // Force Standard mode — Hybrid/LightWeight only provides syntax features
+      "java.server.launchMode": "Standard",
+      // Suppress notifications that can interfere with UI automation
+      "java.help.showReleaseNotes": false,
+      "java.help.firstView": "none",
+      "java.configuration.checkProjectSettingsExclusions": false,
+      "extensions.ignoreRecommendations": true,
+      "telemetry.telemetryLevel": "off",
+      "update.showReleaseNotes": false,
+      "workbench.enableExperiments": false,
+      "redhat.telemetry.enabled": false,
       ...this.options.settings,
     };
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
@@ -154,6 +176,16 @@ export class VscodeDriver {
     this.page = await this.app.firstWindow();
     // Wait for VSCode workbench to render
     await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: 30_000 });
+
+    // Dismiss all notification toasts that may interfere with UI automation
+    await this.dismissAllNotifications();
+  }
+
+  /** Close all visible notification toasts */
+  async dismissAllNotifications(): Promise<void> {
+    try {
+      await this.runCommandFromPalette("Notifications: Clear All Notifications");
+    } catch { /* ignore if command not found */ }
   }
 
   async close(): Promise<void> {
