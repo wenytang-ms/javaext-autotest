@@ -150,23 +150,23 @@ TestRunner God Class 拆分为独立模块：
 - [ ] Copilot CLI 编排入口
   - [ ] `copilot-test run --wiki-plan Test-Plan.md --scenario "Basic"`
   - [ ] 自动提取指定场景 → 转换为内部 TestPlan 对象 → 执行
-- [ ] Wiki Test Plan 全场景覆盖
-  - [x] Basic #1-5 — `java-basic-editing.yaml`
-  - [x] Basic #6-8 — `java-basic-extended.yaml`
-  - [ ] Basic #9 (New Java File) — 需要文件资源管理器右键菜单交互
-  - [x] Maven — `java-maven.yaml`
-  - [x] Maven Multimodule — `java-maven-multimodule.yaml`
-  - [x] Gradle — `java-gradle.yaml`
-  - [ ] Maven Java 25 — 需要 JDK 25 + 对应测试项目
-  - [ ] Gradle Java 25 — 需要 JDK 25 + 对应测试项目
-  - [x] Single file — `java-single-file.yaml`
-  - [ ] Single file without workspace — 需要拖拽文件（无 Driver 支持）
-  - [ ] Fresh import (spring-petclinic) — 需要 clone 外部仓库
-  - [ ] Debugger for Java — 需要新 Driver 能力（启动调试、断点、程序输出）
-  - [ ] Java Test Runner — 需要新 Driver 能力（测试面板、CodeLens）
-  - [ ] Maven for Java — 需要新 Driver 能力（hover、"Resolve unknown type" 交互）
-  - [ ] Java Dependency Viewer — 需要新 Driver 能力（依赖树验证）
-  - [ ] Java Extension Pack — 需要 webview 交互（Classpath 配置页面）
+- [x] Wiki Test Plan 全场景覆盖 (15/16)
+  - [x] Basic #1-5 — `java-basic-editing.yaml` ✅ 8/8
+  - [x] Basic #6-8 — `java-basic-extended.yaml` ✅ 8/8
+  - [x] Basic #9 (New Java File) — `java-new-file-snippet.yaml` ✅ 4/4
+  - [x] Maven — `java-maven.yaml` ✅ 8/8
+  - [x] Maven Multimodule — `java-maven-multimodule.yaml` ✅ 5/5
+  - [x] Gradle — `java-gradle.yaml` ✅ 7/7
+  - [x] Maven Java 25 — `java-maven-java25.yaml` ✅ 6/6
+  - [x] Gradle Java 25 — `java-gradle-java25.yaml` ✅ 6/6
+  - [x] Single file — `java-single-file.yaml` ✅ 6/6
+  - [ ] Single file without workspace — 需要拖拽文件（Playwright 不支持）
+  - [x] Fresh import — `java-fresh-import.yaml`（需要提前 clone spring-petclinic）
+  - [x] Debugger for Java — `java-debugger.yaml` ✅ 6/6
+  - [x] Java Test Runner — `java-test-runner.yaml` ✅ 6/6
+  - [x] Maven for Java — `java-maven-resolve-type.yaml` ✅ 10/10
+  - [x] Java Dependency Viewer — `java-dependency-viewer.yaml` ✅ 4/4
+  - [x] Java Extension Pack — `java-extension-pack.yaml` ✅ 3/3
 
 ---
 
@@ -186,11 +186,11 @@ TestRunner God Class 拆分为独立模块：
 
 ---
 
-## Phase 7 🔲 新增 Driver 能力
+## Phase 7 ✅ 新增 Driver 能力
 
-> 状态：**待开始** · 优先级：中
+> 状态：**已完成**
 
-以下是覆盖 wiki 剩余场景所需的 Driver 能力及 Playwright 可行性分析。
+已实现除 Webview 外的全部 Driver 能力（22 个方法 + 15 个 Action 模式）。
 
 ### 调试（Debugger for Java）
 
@@ -291,4 +291,5 @@ TestRunner God Class 拆分为独立模块：
 | M4: AI 验证 + 解耦 | ✅ 完成 | ActionResolver / StepVerifier / LLMClient 拆分 · Azure OpenAI 集成 · Copilot CLI AGENTS.md |
 | M5: 读 wiki 跑测试 | 🔲 待做 | Copilot CLI 直接读 Markdown → 全自动测试 |
 | M6: CI 集成 | 🔲 待做 | GitHub Actions · HTML 报告 · 并行执行 |
-| M7: Driver 扩展 | 🔲 待做 | 调试 · 测试运行器 · Hover · 依赖树 · Webview |
+| M7: Driver 扩展 | ✅ 完成 | 调试 · 测试运行器 · Hover · 依赖树 · 文件管理器 (22 方法 + 15 Action) |
+| M8: Wiki 全覆盖 | ✅ 完成 | 15/16 场景 · 15 个 test plan · 87 步 · 14 个全绿 |

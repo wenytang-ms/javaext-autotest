@@ -26,12 +26,21 @@ npx autotest validate test-plans/<plan>.yaml
 
 | 文件 | 场景 | 状态 |
 |------|------|------|
-| `test-plans/java-maven.yaml` | Maven 项目：LS → 补全 → 导航 → 编辑 → 诊断 | ✅ 8/8 |
+| `test-plans/java-maven.yaml` | Maven：LS → 补全 → 导航 → 编辑 → 诊断 | ✅ 8/8 |
 | `test-plans/java-maven-multimodule.yaml` | Maven 多模块：两模块补全 | ✅ 5/5 |
-| `test-plans/java-gradle.yaml` | Gradle 项目：LS → 补全 → 编辑 | ✅ 7/7 |
-| `test-plans/java-basic-editing.yaml` | Basic #1-5：代码片段 → Code Action → 编译 | 🔲 待验证 |
+| `test-plans/java-maven-java25.yaml` | Maven JDK 25 兼容性 | ✅ 6/6 |
+| `test-plans/java-gradle.yaml` | Gradle：LS → 补全 → 编辑 | ✅ 7/7 |
+| `test-plans/java-gradle-java25.yaml` | Gradle JDK 25 兼容性 | ✅ 6/6 |
+| `test-plans/java-basic-editing.yaml` | Basic #1-5：class 骨架 → call() → 编译 | ✅ 8/8 |
 | `test-plans/java-basic-extended.yaml` | Basic #6-8：补全 → Import → Rename | ✅ 8/8 |
-| `test-plans/java-single-file.yaml` | 单文件编辑：LS → 补全 → 编辑 | ✅ 6/6 |
+| `test-plans/java-new-file-snippet.yaml` | Basic #9：创建新 Java 文件 | ✅ 4/4 |
+| `test-plans/java-single-file.yaml` | 单文件：LS → 补全 → 编辑 | ✅ 6/6 |
+| `test-plans/java-debugger.yaml` | 调试：断点 → 启动 → 停止 | ✅ 6/6 |
+| `test-plans/java-test-runner.yaml` | 测试：面板 → 运行 → CodeLens | ✅ 6/6 |
+| `test-plans/java-maven-resolve-type.yaml` | Maven for Java：Hover → Code Action | ✅ 10/10 |
+| `test-plans/java-dependency-viewer.yaml` | 依赖视图：展开节点 | ✅ 4/4 |
+| `test-plans/java-extension-pack.yaml` | Extension Pack：Classpath 配置 | ✅ 3/3 |
+| `test-plans/java-fresh-import.yaml` | Fresh Import：Spring Petclinic | 🔲 需 clone |
 
 ### CLI 选项
 
