@@ -65,6 +65,9 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
         ? path.resolve(planDir, setup.extensionPath as string)
         : undefined,
       extensions: setup.extensions as string[] | undefined,
+      vsix: Array.isArray(setup.vsix)
+        ? (setup.vsix as string[]).map(v => path.resolve(planDir, v))
+        : undefined,
       vscodeVersion: (setup.vscodeVersion as "stable" | "insiders") ?? "insiders",
       workspace: setup.workspace
         ? path.resolve(planDir, setup.workspace as string)

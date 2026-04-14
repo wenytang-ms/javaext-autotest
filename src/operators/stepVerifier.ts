@@ -1,28 +1,19 @@
 /**
- * StepVerifier — runs verification checks for a test step.
+ * StepVerifier — runs deterministic verification checks for a test step.
  *
- * Supports both deterministic checks (verifyFile, verifyEditor, verifyProblems, etc.)
- * and LLM-powered natural language verification (verify field + screenshot).
+ * Supports: verifyFile, verifyEditor, verifyProblems, verifyCompletion, verifyNotification.
+ * LLM-powered analysis is handled separately by TestRunner as post-failure analysis.
  */
 
-import * as fs from "node:fs";
 import * as path from "node:path";
 import type { VscodeDriver } from "../drivers/vscodeDriver.js";
-import type { TestStep, VerificationResult } from "../types.js";
-import { LLMClient } from "./llmClient.js";
-
-export interface StepVerifierOptions {
-  /** LLM client for AI-powered verification. If null, verify fields auto-pass. */
-  llmClient?: LLMClient | null;
-}
+import type { TestStep } from "../types.js";
 
 export class StepVerifier {
   private driver: VscodeDriver;
-  private llm: LLMClient | null;
 
-  constructor(driver: VscodeDriver, options: StepVerifierOptions = {}) {
+  constructor(driver: VscodeDriver) {
     this.driver = driver;
-    this.llm = options.llmClient ?? null;
   }
 
   /**
@@ -33,10 +24,9 @@ export class StepVerifier {
    */
   async verify(
     step: TestStep,
-    screenshotPath?: string,
   ): Promise<{ passed: boolean; reason?: string }> {
-    // If no verification defined, auto-pass
-    if (!step.verify && !step.verifyFile && !step.verifyNotification
+    // If no deterministic verification defined, auto-pass
+    if (!step.verifyFile && !step.verifyNotification
         && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion) {
       return { passed: true };
     }
@@ -57,13 +47,6 @@ export class StepVerifier {
 
     const completionResult = await this.verifyCompletion(step);
     if (completionResult && !completionResult.passed) return completionResult;
-
-    // ── LLM verification for natural language `verify` field ──
-
-    if (step.verify) {
-      const llmResult = await this.verifyWithLLM(step.verify, screenshotPath);
-      return llmResult;
-    }
 
     return { passed: true };
   }
@@ -128,6 +111,11 @@ export class StepVerifier {
 
     while (Date.now() < deadline) {
       lastCounts = await this.driver.getProblemsCount();
+      // -1 means status bar not ready yet — keep polling
+      if (lastCounts.errors === -1) {
+        await this.driver.wait(pollInterval / 1000);
+        continue;
+      }
       const errorsOk = step.verifyProblems.errors === undefined || (
         step.verifyProblems.atLeast
           ? lastCounts.errors >= step.verifyProblems.errors
@@ -179,43 +167,4 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  // ─── LLM Verification ───────────────────────────────────
-
-  private async verifyWithLLM(
-    description: string,
-    screenshotPath?: string,
-  ): Promise<{ passed: boolean; reason?: string }> {
-    // If no LLM client or not configured, auto-pass with warning
-    if (!this.llm || !this.llm.isConfigured()) {
-      console.log(`   🤖 AI verify skipped (not configured): "${description}"`);
-      return { passed: true, reason: `LLM not configured — auto-pass: ${description}` };
-    }
-
-    // Read screenshot as base64
-    if (!screenshotPath || !fs.existsSync(screenshotPath)) {
-      console.log(`   🤖 AI verify skipped (no screenshot): "${description}"`);
-      return { passed: true, reason: `No screenshot for LLM verify: ${description}` };
-    }
-
-    console.log(`   🤖 AI verifying: "${description}"`);
-    const screenshotBase64 = fs.readFileSync(screenshotPath).toString("base64");
-
-    try {
-      const result: VerificationResult = await this.llm.verifyScreenshot(screenshotBase64, description);
-
-      const icon = result.passed ? "✅" : "❌";
-      console.log(`   🤖 ${icon} confidence=${result.confidence.toFixed(2)}: ${result.reasoning}`);
-
-      return {
-        passed: result.passed,
-        reason: `[LLM ${result.confidence.toFixed(2)}] ${result.reasoning}`,
-      };
-    } catch (e) {
-      console.log(`   🤖 ⚠️ LLM error: ${(e as Error).message}`);
-      return {
-        passed: true,
-        reason: `LLM error (auto-pass): ${(e as Error).message}`,
-      };
-    }
-  }
 }

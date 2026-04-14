@@ -70,6 +70,10 @@ export class ActionResolver {
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },
       {
+        regex: /(?:doubleClick|双击)\s+(.+?)(?:\s*节点|tree item)?$/i,
+        handler: async (m) => { await d.doubleClickTreeItem(m[1]); },
+      },
+      {
         regex: /(?:选择|select)\s+(.+?)(?:\s*选项|option)?$/i,
         handler: async (m) => { await d.selectPaletteOption(m[1]); },
       },
@@ -134,6 +138,18 @@ export class ActionResolver {
       {
         regex: /(?:applyCodeAction|应用代码操作)\s+(.+)/i,
         handler: async (m) => { await d.applyCodeAction(m[1].trim()); },
+      },
+      {
+        regex: /(?:findText|查找文本)\s+(.+)/i,
+        handler: async (m) => { await d.findText(m[1].trim()); },
+      },
+      {
+        regex: /(?:renameSymbol|重命名)\s+(.+)/i,
+        handler: async (m) => { await d.renameSymbol(m[1].trim()); },
+      },
+      {
+        regex: /(?:organizeImports|整理导入)/i,
+        handler: async () => { await d.organizeImports(); },
       },
       {
         regex: /^(?:triggerCompletion|触发代码补全)$/i,

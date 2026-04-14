@@ -1,5 +1,5 @@
 {
-  "name": "vscode-autotest",
+  "name": "@vscjava/vscode-autotest",
   "version": "0.1.0",
   "description": "AI-driven VSCode extension E2E testing framework — YAML test plans + Playwright + LLM verification",
   "type": "module",

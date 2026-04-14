@@ -1,78 +1,162 @@
-# Test Plan: Java Basic Editing (from vscode-java-pack.wiki)
+# Test Plan: Java Basic (from vscode-java-pack.wiki)
 #
-# 来源: wiki Test-Plan.md "Basic" 场景 (Steps 1-5)
-# 验证: 打开 Eclipse 项目 → 语言服务器就绪 → 代码片段 → Code Action 修复错误
+# Source: wiki Test-Plan.md "Basic" scenario (Steps 1-8)
+# Verifies: LS ready → class snippet → Code Action → completion → Organize Imports → Rename
 #
-# 前置条件:
-#   - vscode-java 仓库已 clone 到本地
-#   - JDK 已安装且可用
+# Prerequisites:
+#   - vscode-java repo cloned locally
+#   - JDK installed
 #
-# 用法: autotest run test-plans/java-basic-editing.yaml
+# Usage: autotest run test-plans/java-basic-editing.yaml
 
-name: "Java Basic Editing — 诊断、代码片段、Code Action"
+name: "Java Basic — Full Scenario (Steps 1-8)"
 description: |
-  对应 wiki Test Plan 的 Basic 场景前 5 步:
-  打开 simple-app Eclipse 项目，验证语言服务器启动，
-  使用 class 代码片段修复 Foo.java，通过 Code Action 补全缺失方法，
-  最终编译无错误。
+  Wiki Basic scenario steps 1-8 in a single run:
+  1-2: Open simple-app, verify LS ready with 2 errors
+  3: Class snippet to fix Foo.java
+  4: Code Action to create missing call() method
+  5: Save all, verify 0 errors
+  6: Type File code, verify completion
+  7: Organize Imports (Shift+Alt+O)
+  8: Rename Symbol (F2)
 
 setup:
   extension: "redhat.java"
   extensions:
     - "vscjava.vscode-java-pack"
-  # 如果需要测试扩展开发版本，取消注释:
-  # extensionPath: "../../vscode-java"
   vscodeVersion: "stable"
   workspace: "../../vscode-java/test/resources/projects/eclipse/simple-app"
-  timeout: 60  # Java LS 启动较慢，需要足够等待时间
+  timeout: 60
 
 steps:
-  # ── Step 1: 打开项目 ──────────────────────────────────────
-  - id: "project-loaded"
-    action: "等待 5 秒"
-    verify: "项目文件树可见"
+  # ══════════════════════════════════════════════════════════
+  #  Steps 1-5: Diagnostics, Snippet, Code Action
+  # ══════════════════════════════════════════════════════════
 
-  # ── Step 2: 语言服务器就绪 + 诊断 ────────────────────────
-  # wiki: "After the language server is initialized, check the status bar
-  #        icon is 👍, and the problems view has two errors."
+  # ── Step 1: Project loaded ──────────────────────────────────
+  - id: "project-loaded"
+    action: "wait 5 seconds"
+    verify: "Project file tree is visible"
+
+  # ── Step 2: LS ready + 2 errors ─────────────────────────────
   - id: "ls-ready"
     action: "waitForLanguageServer"
-    verify: "状态栏显示 Java 语言服务器已就绪（👍 图标）"
+    verify: "Status bar shows Language Server is ready with 2 errors"
     verifyProblems:
       errors: 2
     timeout: 120
 
-  # ── Step 3: 修复 Foo.java（写入 class 代码骨架）────────────
-  # wiki: "Select Foo.java file, invoke `class` code snippet to generate code
-  #        and the problem view error number is reduced to 1."
-  # 注意: Foo.java 是空文件，使用磁盘修改写入 class 骨架（snippet 在空文件中不稳定）
+  # ── Step 3: Class snippet in Foo.java ───────────────────────
   - id: "open-foo"
-    action: "打开文件 Foo.java"
-    verify: "Foo.java 文件已在编辑器中打开"
+    action: "open file Foo.java"
+    verify: "Foo.java is open in editor"
     timeout: 15
 
-  - id: "write-class-body"
-    action: "insertLineInFile src/app/Foo.java 1 package app;\n\npublic class Foo {\n\n}"
+  - id: "type-class-snippet"
+    action: "typeAndTriggerSnippet class"
+    verify: "Class skeleton generated via snippet"
     verifyEditor:
       contains: "public class Foo"
+    timeout: 30
+
+  - id: "save-foo"
+    action: "saveFile"
     verifyProblems:
       errors: 1
     timeout: 30
 
-  # ── Step 4: 创建缺失方法 call() ──────────────────────────
-  # wiki: "Select 'Create method call() in type Foo' to fix the error."
-  # 直接通过磁盘修改添加 call() 方法（Code Action 在自动化中不稳定）
-  - id: "add-call-method"
-    action: "insertLineInFile src/app/Foo.java 4     public void call() {}\n"
+  # ── Step 4: Code Action to create call() ────────────────────
+  - id: "close-all-before-codeaction"
+    action: "run command Workbench: Close All Editors"
+
+  - id: "navigate-to-error"
+    action: "navigateToError 1"
+    verify: "Cursor jumped to f.call() error in Bar.java"
+
+  - id: "apply-code-action"
+    action: "applyCodeAction Create method 'call()'"
+    verify: "Code Action created call() method in Foo.java"
+    timeout: 15
+
+  # ── Step 5: Save all + verify 0 errors ──────────────────────
+  - id: "save-all-step5"
+    action: "run command File: Save All"
+    verify: "All files saved, no compilation errors"
     verifyProblems:
       errors: 0
+    timeout: 60
+
+  # ══════════════════════════════════════════════════════════
+  #  Steps 6-8: Completion, Organize Imports, Rename
+  # ══════════════════════════════════════════════════════════
+
+  # Close all editors to prevent duplicate tab issues
+  - id: "close-all-before-step6"
+    action: "run command Workbench: Close All Editors"
+
+  # ── Step 6: Type File code ────────────────────────────────
+  # Use insertLineInFile so LS properly detects the unresolved File type
+  - id: "open-app"
+    action: "open file App.java"
+    verify: "App.java is open in editor"
+    timeout: 10
+
+  - id: "insert-file-code"
+    action: "insertLineInFile src/app/App.java 6         File f = new File(\"demo.txt\");"
+    verifyEditor:
+      contains: "File f = new File"
+    verifyProblems:
+      errors: 1
+      atLeast: true
     timeout: 30
 
-  # ── Step 5: 保存并验证无错误 ─────────────────────────────
-  # wiki: "Save all the files... There should be no errors."
-  - id: "save-all"
-    action: "执行命令 File: Save All"
-    verify: "所有文件已保存，编译无错误"
-    verifyProblems:
-      errors: 0
-    timeout: 30
+  # ── Step 7: Organize Imports (Shift+Alt+O) ──────────────────
+  - id: "organize-imports"
+    action: "organizeImports"
+    verify: "Organize Imports resolved File type"
+    timeout: 15
+
+  # Save all and reopen to see the import (LS may write to a second tab)
+  - id: "save-after-organize"
+    action: "run command File: Save All"
+
+  - id: "close-all-after-organize"
+    action: "run command Workbench: Close All Editors"
+
+  - id: "reopen-app"
+    action: "open file App.java"
+    verify: "App.java shows import java.io.File after Organize Imports"
+    verifyEditor:
+      contains: "import java.io.File"
+    timeout: 10
+
+  # ── Step 8: Rename Symbol (F2) ──────────────────────────────
+  - id: "close-all-before-rename"
+    action: "run command Workbench: Close All Editors"
+
+  - id: "open-foo-for-rename"
+    action: "open file Foo.java"
+    verify: "Foo.java is open in editor"
+    timeout: 10
+
+  # Place cursor on "Foo" — use Find to locate the text, then close Find (cursor stays on it)
+  - id: "find-foo-class"
+    action: "findText Foo"
+
+  - id: "rename-foo-to-foonew"
+    action: "renameSymbol FooNew"
+    timeout: 15
+
+  # LS renames file to FooNew.java — close stale tab and click renamed file in Explorer
+  - id: "save-after-rename"
+    action: "run command File: Save All"
+
+  - id: "close-all-after-rename"
+    action: "run command Workbench: Close All Editors"
+
+  - id: "click-foonew-in-explorer"
+    action: "doubleClick FooNew.java"
+    verify: "FooNew.java shows renamed class"
+    verifyEditor:
+      contains: "public class FooNew"
+    timeout: 15

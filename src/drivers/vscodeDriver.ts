@@ -9,7 +9,7 @@
 
 import { _electron, type ElectronApplication, type Page } from "@playwright/test";
 import { downloadAndUnzipVSCode, resolveCliArgsFromVSCodeExecutablePath } from "@vscode/test-electron";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -32,6 +32,8 @@ export class VscodeDriver {
   private options: VscodeDriverOptions;
   /** Temp copy of workspace — cleaned up on close() */
   private tempWorkspaceDir: string | null = null;
+  /** Git worktree path — cleaned up on close() */
+  private worktreeRoot: string | null = null;
 
   constructor(options: VscodeDriverOptions = {}) {
     this.options = {
@@ -71,23 +73,28 @@ export class VscodeDriver {
     }
 
     // Pre-install marketplace extensions before launching
-    if (this.options.extensions && this.options.extensions.length > 0) {
-      console.log(`📦 Installing ${this.options.extensions.length} extension(s)...`);
-      for (const extId of this.options.extensions) {
-        console.log(`   ↳ ${extId}`);
+    const allExtensions = [
+      ...(this.options.extensions ?? []),
+      ...(this.options.vsix ?? []),
+    ];
+    if (allExtensions.length > 0) {
+      console.log(`📦 Installing ${allExtensions.length} extension(s)...`);
+      for (const ext of allExtensions) {
+        const isVsix = ext.endsWith(".vsix");
+        console.log(`   ↳ ${ext}${isVsix ? " (vsix)" : ""}`);
         try {
           execFileSync(cli, [
             ...baseArgs,
-            "--install-extension", extId,
+            "--install-extension", ext,
             "--force",
           ], {
             stdio: "pipe",
             timeout: 120_000,
             env: { ...process.env },
-            shell: true,  // Required on Windows for .cmd files
+            shell: true,
           });
         } catch (e) {
-          console.warn(`   ⚠️  Failed to install ${extId}: ${(e as Error).message}`);
+          console.warn(`   ⚠️  Failed to install ${ext}: ${(e as Error).message}`);
         }
       }
       console.log(`📦 Extensions installed\n`);
@@ -109,24 +116,32 @@ export class VscodeDriver {
     }
 
     if (this.options.workspacePath) {
-      // Use a fixed temp directory name so cleanup is deterministic
-      const tmpDir = os.tmpdir();
-      const fixedDir = path.join(tmpDir, "autotest-workspace");
-      // Remove any previous workspace copy and stale temp dirs
-      try {
-        for (const entry of fs.readdirSync(tmpDir)) {
-          if (entry.startsWith("autotest-ws-") || entry === "autotest-workspace") {
-            fs.rmSync(path.join(tmpDir, entry), { recursive: true, force: true });
+      // Use git worktree for workspace isolation — this preserves all project paths
+      // so the Language Server doesn't get confused by temp directory copies.
+      const wsPath = this.options.workspacePath;
+      const worktreeDir = await this.createWorktree(wsPath);
+      if (worktreeDir) {
+        console.log(`📂 Workspace (worktree): ${worktreeDir}`);
+        args.push(worktreeDir);
+      } else {
+        // Fallback: copy workspace to temp dir (for non-git workspaces)
+        const tmpDir = os.tmpdir();
+        const fixedDir = path.join(tmpDir, "autotest-workspace");
+        try {
+          for (const entry of fs.readdirSync(tmpDir)) {
+            if (entry.startsWith("autotest-ws-") || entry === "autotest-workspace") {
+              fs.rmSync(path.join(tmpDir, entry), { recursive: true, force: true });
+            }
           }
-        }
-      } catch { /* ignore */ }
+        } catch { /* ignore */ }
 
-      this.tempWorkspaceDir = fixedDir;
-      fs.mkdirSync(fixedDir, { recursive: true });
-      const destDir = path.join(fixedDir, path.basename(this.options.workspacePath));
-      fs.cpSync(this.options.workspacePath, destDir, { recursive: true });
-      console.log(`📂 Workspace copied to: ${destDir}`);
-      args.push(destDir);
+        this.tempWorkspaceDir = fixedDir;
+        fs.mkdirSync(fixedDir, { recursive: true });
+        const destDir = path.join(fixedDir, path.basename(wsPath));
+        fs.cpSync(wsPath, destDir, { recursive: true });
+        console.log(`📂 Workspace (copy): ${destDir}`);
+        args.push(destDir);
+      }
     } else if (this.options.filePath) {
       // Single file mode — copy the file to a temp dir and open it directly
       const tmpDir = os.tmpdir();
@@ -194,7 +209,22 @@ export class VscodeDriver {
       this.app = null;
       this.page = null;
     }
-    // Clean up temp workspace copy (retry to handle file locks released after process exit)
+    // Clean up git worktree
+    if (this.worktreeRoot) {
+      const wt = this.worktreeRoot;
+      this.worktreeRoot = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          execSync(`git worktree remove "${wt}" --force`, { stdio: "pipe", cwd: wt });
+          break;
+        } catch {
+          // If git worktree remove fails, try manual delete
+          try { fs.rmSync(wt, { recursive: true, force: true }); break; } catch { /* retry */ }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+    }
+    // Clean up temp workspace copy
     if (this.tempWorkspaceDir) {
       const dir = this.tempWorkspaceDir;
       this.tempWorkspaceDir = null;
@@ -366,6 +396,15 @@ export class VscodeDriver {
     const item = page.getByRole("treeitem", { name }).locator("a").first();
     await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await item.click();
+    await page.waitForTimeout(500);
+  }
+
+  /** Double-click a tree item to open it (e.g., open a file from Explorer) */
+  async doubleClickTreeItem(name: string): Promise<void> {
+    const page = this.getPage();
+    const item = page.getByRole("treeitem", { name }).locator("a").first();
+    await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await item.dblclick();
     await page.waitForTimeout(500);
   }
 
@@ -596,32 +635,48 @@ export class VscodeDriver {
   async getProblemsCount(): Promise<{ errors: number; warnings: number }> {
     const page = this.getPage();
 
-    // Strategy 1: read from status bar aria-labels (fast, ~5 elements)
-    const items = page.locator(".statusbar a");
-    const count = await items.count();
-    for (let i = 0; i < count; i++) {
-      const label = await items.nth(i).getAttribute("aria-label") ?? "";
-      const errMatch = label.match(/(\d+)\s*error/i);
-      const warnMatch = label.match(/(\d+)\s*warning/i);
-      if (errMatch || warnMatch) {
-        return {
-          errors: errMatch ? parseInt(errMatch[1], 10) : 0,
-          warnings: warnMatch ? parseInt(warnMatch[1], 10) : 0,
-        };
+    // Locate the problems indicator by its error/warning icons in the status bar.
+    // The indicator contains codicon-error and codicon-warning spans followed by count text.
+    // We read textContent directly — it updates faster than aria-label.
+    const result = await page.evaluate(() => {
+      const footer = document.querySelector("footer");
+      if (!footer) return null;
+
+      // Find the link that contains error/warning icons
+      for (const link of footer.querySelectorAll("a")) {
+        const hasErrorIcon = link.querySelector("[class*='codicon-error']");
+        const hasWarningIcon = link.querySelector("[class*='codicon-warning']");
+
+        if (hasErrorIcon || hasWarningIcon) {
+          // Read counts from textContent: icons render as empty, numbers as text
+          // textContent looks like " 0  2  1" (errors, warnings, infos)
+          const text = link.textContent ?? "";
+          const numbers = text.match(/\d+/g);
+          if (numbers && numbers.length >= 2) {
+            return {
+              errors: parseInt(numbers[0], 10),
+              warnings: parseInt(numbers[1], 10),
+            };
+          }
+          // Only one number visible
+          if (numbers && numbers.length === 1) {
+            return {
+              errors: hasErrorIcon ? parseInt(numbers[0], 10) : 0,
+              warnings: hasWarningIcon ? parseInt(numbers[0], 10) : 0,
+            };
+          }
+        }
+
+        // Also check for "No Problems" aria-label (when 0/0, icons may not be present)
+        const label = link.getAttribute("aria-label") ?? "";
+        if (/no problems/i.test(label)) {
+          return { errors: 0, warnings: 0 };
+        }
       }
-    }
+      return null;
+    });
 
-    // Strategy 2: open Problems panel and count by icon class
-    await this.runCommandFromPalette("View: Focus Problems (Errors, Warnings, Infos)");
-    await page.waitForTimeout(500);
-
-    const errors = await page.locator(".markers-panel .codicon-error").count().catch(() => 0);
-    const warnings = await page.locator(".markers-panel .codicon-warning").count().catch(() => 0);
-
-    // Close the panel focus
-    await page.keyboard.press("Escape");
-
-    return { errors, warnings };
+    return result ?? { errors: -1, warnings: -1 };
   }
 
   /** Navigate to the next problem (error/warning) in the editor */
@@ -631,8 +686,29 @@ export class VscodeDriver {
 
   /** Navigate to a specific error by index (1-based) */
   async navigateToError(index: number): Promise<void> {
-    for (let i = 0; i < index; i++) {
-      await this.runCommandFromPalette(NEXT_MARKER_COMMAND);
+    const page = this.getPage();
+
+    // Open Problems panel and click the Nth error directly —
+    // this works across files, unlike "Go to Next Problem" which stays in current file.
+    await this.runCommandFromPalette("View: Focus Problems (Errors, Warnings, Infos)");
+    await page.waitForTimeout(500);
+
+    const errorRows = page.locator(".markers-panel .monaco-list-row .codicon-error");
+    const count = await errorRows.count();
+
+    if (count >= index) {
+      // Click the error row to navigate to its location
+      const targetRow = errorRows.nth(index - 1).locator("..").locator("..");
+      await targetRow.click();
+      await page.waitForTimeout(500);
+      // Double-click to open the file at the error location
+      await targetRow.dblclick();
+      await page.waitForTimeout(1000);
+    } else {
+      // Fallback to "Go to Next Problem" command
+      for (let i = 0; i < index; i++) {
+        await this.runCommandFromPalette(NEXT_MARKER_COMMAND);
+      }
     }
   }
 
@@ -665,6 +741,52 @@ export class VscodeDriver {
 
     // Wait for code action to be applied
     await page.waitForTimeout(1000);
+  }
+
+  /**
+   * Rename the symbol at the current cursor position (F2).
+   * Types the new name and confirms with Enter.
+   */
+  /** Use Find (Ctrl+F) to locate text and place cursor on it, then close the find dialog */
+  async findText(text: string): Promise<void> {
+    const page = this.getPage();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+F`);
+    const findInput = page.locator(".find-part .input");
+    await findInput.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await findInput.fill(text);
+    await page.waitForTimeout(500);
+    // Press Escape to close Find widget — cursor stays at the found occurrence
+    await page.keyboard.press("Escape");
+    await page.locator(".find-part").waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
+  async renameSymbol(newName: string): Promise<void> {
+    const page = this.getPage();
+    await page.keyboard.press("F2");
+    // Wait for rename input box to appear
+    const renameInput = page.locator(".rename-box .rename-input");
+    await renameInput.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    // Clear existing text and type new name
+    await renameInput.fill(newName);
+    await page.waitForTimeout(300);
+    await page.keyboard.press(ENTER_KEY);
+    await page.waitForTimeout(1000);
+  }
+
+  /** Organize Imports via keyboard shortcut (Shift+Alt+O) */
+  async organizeImports(): Promise<void> {
+    const page = this.getPage();
+    await page.keyboard.press("Shift+Alt+O");
+    await page.waitForTimeout(1000);
+    // If a Quick Pick appears for ambiguous imports, select the first option
+    const quickPick = page.locator(QUICK_INPUT_WIDGET_SELECTOR);
+    const hasQuickPick = await quickPick.isVisible().catch(() => false);
+    if (hasQuickPick) {
+      await page.keyboard.press(ENTER_KEY);
+      await quickPick.waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    }
   }
 
   /**
@@ -738,8 +860,17 @@ export class VscodeDriver {
     return fs.readFileSync(filePath, "utf-8");
   }
 
-  /** Get the workspace root path (temp copy) */
+  /** Get the workspace root path (worktree or temp copy) */
   getWorkspacePath(): string | null {
+    // Prefer worktree workspace (preserves real git paths)
+    if (this.worktreeRoot && this.options.workspacePath) {
+      const gitRoot = this.findGitRoot(this.options.workspacePath);
+      if (gitRoot) {
+        const relPath = path.relative(gitRoot, this.options.workspacePath);
+        return path.join(this.worktreeRoot, relPath);
+      }
+    }
+    // Fallback to temp copy
     if (!this.tempWorkspaceDir) return null;
     const entries = fs.readdirSync(this.tempWorkspaceDir);
     return entries.length > 0 ? path.join(this.tempWorkspaceDir, entries[0]) : null;
@@ -1010,5 +1141,62 @@ export class VscodeDriver {
   /** Wait for a specified duration (seconds) */
   async wait(seconds: number): Promise<void> {
     await this.getPage().waitForTimeout(seconds * 1000);
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  Private helpers
+  // ═══════════════════════════════════════════════════════
+
+  /** Find the git repository root for a given path */
+  private findGitRoot(dirPath: string): string | null {
+    try {
+      const result = execSync("git rev-parse --show-toplevel", {
+        cwd: dirPath,
+        stdio: "pipe",
+        encoding: "utf-8",
+      });
+      return result.trim();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Create a git worktree for workspace isolation.
+   * Returns the workspace subdirectory path within the worktree, or null if not a git repo.
+   */
+  private async createWorktree(workspacePath: string): Promise<string | null> {
+    const gitRoot = this.findGitRoot(workspacePath);
+    if (!gitRoot) return null;
+
+    const tmpDir = os.tmpdir();
+    const worktreeDir = path.join(tmpDir, "autotest-worktree");
+
+    // Clean up any previous worktree
+    try {
+      execSync(`git worktree remove "${worktreeDir}" --force`, {
+        cwd: gitRoot, stdio: "pipe",
+      });
+    } catch { /* may not exist */ }
+    if (fs.existsSync(worktreeDir)) {
+      fs.rmSync(worktreeDir, { recursive: true, force: true });
+    }
+
+    // Create new worktree from HEAD
+    try {
+      execSync(`git worktree add "${worktreeDir}" HEAD --detach`, {
+        cwd: gitRoot, stdio: "pipe",
+      });
+    } catch (e) {
+      console.warn(`⚠️ Failed to create git worktree: ${(e as Error).message.slice(0, 100)}`);
+      return null;
+    }
+
+    this.worktreeRoot = worktreeDir;
+
+    // Compute the workspace subdirectory within the worktree
+    const relPath = path.relative(gitRoot, workspacePath);
+    const worktreeWorkspace = path.join(worktreeDir, relPath);
+    return worktreeWorkspace;
   }
 }

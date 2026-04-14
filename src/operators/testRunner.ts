@@ -26,6 +26,7 @@ export class TestRunner {
   private plan: TestPlan;
   private actionResolver: ActionResolver;
   private verifier: StepVerifier;
+  private llm: LLMClient | null;
   private outputDir: string | null;
   private screenshotDir: string | null;
   private screenshotCounter = 0;
@@ -39,6 +40,7 @@ export class TestRunner {
       vscodeVersion: plan.setup.vscodeVersion,
       extensionPath: plan.setup.extensionPath,
       extensions: plan.setup.extensions,
+      vsix: plan.setup.vsix,
       workspacePath: plan.setup.workspace,
       filePath: plan.setup.file,
       settings: plan.setup.settings,
@@ -48,8 +50,8 @@ export class TestRunner {
       lsTimeout: (plan.setup.timeout ?? 120) * 1000,
     });
 
-    const llm = options.noLLM ? null : new LLMClient();
-    this.verifier = new StepVerifier(this.driver, { llmClient: llm });
+    this.verifier = new StepVerifier(this.driver);
+    this.llm = options.noLLM ? null : new LLMClient();
   }
 
   /** Force-close the VSCode instance (for signal handlers) */
@@ -111,6 +113,15 @@ export class TestRunner {
 
     console.log(`\n📊 Results: ${summary.passed}/${summary.total} passed`);
 
+    // Post-analysis: use LLM to analyze failed/error steps and provide suggestions
+    if (this.llm?.isConfigured() && (summary.failed + summary.errors) > 0 && this.screenshotDir) {
+      console.log(`\n🤖 Analyzing ${summary.failed + summary.errors} failed step(s) with LLM...`);
+      for (const result of results) {
+        if (result.status !== "fail" && result.status !== "error") continue;
+        await this.analyzeFailure(result);
+      }
+    }
+
     const report: TestReport = {
       planName: this.plan.name,
       startTime: startTime.toISOString(),
@@ -146,8 +157,8 @@ export class TestRunner {
 
       const afterPath = await this.takeScreenshot(step.id, "after");
 
-      // Delegate verification to StepVerifier (pass screenshot for LLM)
-      const verifyResult = await this.verifier.verify(step, afterPath);
+      // Delegate verification to StepVerifier (deterministic only)
+      const verifyResult = await this.verifier.verify(step);
 
       return {
         stepId: step.id,
@@ -208,6 +219,40 @@ export class TestRunner {
       } catch (e) {
         throw new Error(`Failed to clone ${repo.url}: ${(e as Error).message.slice(0, 200)}`);
       }
+    }
+  }
+
+  private async analyzeFailure(result: StepResult): Promise<void> {
+    if (!this.llm || !this.screenshotDir) return;
+
+    // Find before/after screenshots for this step
+    const files = fs.readdirSync(this.screenshotDir);
+    const beforeFile = files.find(f => f.includes(`_${result.stepId}_before.png`));
+    const afterFile = files.find(f => f.includes(`_${result.stepId}_after.png`))
+      ?? files.find(f => f.includes(`_${result.stepId}_error.png`));
+
+    if (!beforeFile || !afterFile) return;
+
+    const beforeBase64 = fs.readFileSync(path.join(this.screenshotDir, beforeFile)).toString("base64");
+    const afterBase64 = fs.readFileSync(path.join(this.screenshotDir, afterFile)).toString("base64");
+
+    const step = this.plan.steps.find(s => s.id === result.stepId);
+    const verifyDesc = step?.verify ?? `Action "${result.action}" should have succeeded`;
+
+    try {
+      const analysis = await this.llm.verifyStep(
+        beforeBase64, afterBase64, result.action, verifyDesc
+      );
+
+      console.log(`\n   🤖 [${result.stepId}] LLM Analysis:`);
+      console.log(`      Reasoning: ${analysis.reasoning}`);
+      if (analysis.suggestion) {
+        console.log(`      💡 Suggestion: ${analysis.suggestion}`);
+      }
+
+      result.reason = `${result.reason}\n[LLM] ${analysis.reasoning}${analysis.suggestion ? `\n💡 ${analysis.suggestion}` : ""}`;
+    } catch (e) {
+      console.log(`   🤖 ⚠️ LLM analysis error: ${(e as Error).message}`);
     }
   }
 }

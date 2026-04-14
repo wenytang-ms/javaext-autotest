@@ -16,6 +16,8 @@ export interface TestSetup {
   extensionPath?: string;
   /** Marketplace extensions to install before launch (e.g. ["vscjava.vscode-java-pack"]) */
   extensions?: string[];
+  /** Local VSIX files to install before launch (paths relative to test plan file) */
+  vsix?: string[];
   vscodeVersion?: "stable" | "insiders";
   /** Workspace folder to open. Mutually exclusive with `file`. */
   workspace?: string;
@@ -103,6 +105,8 @@ export interface VscodeDriverOptions {
   extensionPath?: string;
   /** Marketplace extension IDs to install before launch */
   extensions?: string[];
+  /** Local VSIX file paths to install before launch */
+  vsix?: string[];
   workspacePath?: string;
   /** Single file to open (no workspace) */
   filePath?: string;
@@ -158,4 +162,6 @@ export interface VerificationResult {
   passed: boolean;
   reasoning: string;
   confidence: number; // 0-1
+  /** Suggestion for fixing the failure (only when passed=false) */
+  suggestion?: string;
 }

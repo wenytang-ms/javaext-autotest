@@ -264,7 +264,44 @@ TestRunner God Class 拆分为独立模块：
 
 ---
 
-## Phase 8 🔲 稳定性与扩展
+## Phase 8 🔲 Test Plan 审计修复
+
+> 状态：**进行中** · 优先级：高
+> 
+> 详细审计报告见 [test-plan-audit.md](test-plan-audit.md)
+
+### 框架层修复
+
+- [x] `renameSymbol(newName)` — F2 重命名 Driver 方法
+- [x] `organizeImports()` — Shift+Alt+O Driver 方法
+- [x] 临时 workspace 路径问题 — **已用 git worktree 解决**，所有文件路径统一在 worktree 下，LS 不再混淆
+- [ ] Code Action 重复内容问题 — `typeAndTriggerSnippet` 在 tab 1 生成 class body，Code Action 在 tab 2 再次基于磁盘生成 `call()`，save-all 后两个 tab 合并导致 `Duplicate method`。需要更精细的 tab 管理（关闭旧 tab 后再触发 Code Action）
+- [ ] `getProblemsCount` 时序问题 — status bar 的 codicon textContent 有延迟更新，polling 可能读到旧值
+
+### Test Plan 修复 — 恢复真实 UI 操作（替代磁盘编辑绕过）
+
+- [x] Basic #3: class snippet — `typeAndTriggerSnippet class` 已验证可工作（截图确认）
+- [x] Basic #4: Code Action — `applyCodeAction` + `navigateToError` 可工作（截图确认 `call()` 已生成），但 save-all 后出现 Duplicate method 问题（见上）
+- [ ] Basic #7: Organize Imports — `organizeImports()` 命令可执行（需在 worktree 下验证）
+- [x] Basic #8: Rename Symbol — `renameSymbol` Driver 已实现（需 Foo.java 有内容才能运行）
+- [ ] Basic: 合并 basic-editing + basic-extended 为一个 test plan（共享 workspace 状态）
+
+### Test Plan 修复 — 加强验证（替代 auto-pass）
+
+- [ ] Debugger: 用 `waitForBreakpointHit()` 替代 `wait 5s`，验证断点真正命中
+- [ ] Test Runner: 用 `waitForTestComplete()` + `getTestResults()` 验证测试通过
+- [ ] Maven for Java: 添加 `verifyEditor` 检查 import 是否添加、`verifyFile` 检查 pom.xml
+- [ ] Dependency Viewer: 添加 `clickTreeItem` 验证 JDK Libraries / Maven Dependencies 节点
+
+### 不修复（已知限制）
+
+- Basic #9: Explorer 右键 New File — snippet 需要 VSCode 新文件流程触发，磁盘创建无法模拟
+- Basic #5: Force Compilation — Quick Pick 在 0 errors 时不弹出，行为不一致
+- Extension Pack: Classpath 配置 — webview 内部交互不支持
+
+---
+
+## Phase 9 🔲 稳定性与扩展
 
 > 状态：**待开始** · 优先级：低
 
@@ -291,5 +328,6 @@ TestRunner God Class 拆分为独立模块：
 | M4: AI 验证 + 解耦 | ✅ 完成 | ActionResolver / StepVerifier / LLMClient 拆分 · Azure OpenAI 集成 · Copilot CLI AGENTS.md |
 | M5: 读 wiki 跑测试 | 🔲 待做 | Copilot CLI 直接读 Markdown → 全自动测试 |
 | M6: CI 集成 | 🔲 待做 | GitHub Actions · HTML 报告 · 并行执行 |
-| M7: Driver 扩展 | ✅ 完成 | 调试 · 测试运行器 · Hover · 依赖树 · 文件管理器 (22 方法 + 15 Action) |
-| M8: Wiki 全覆盖 | ✅ 完成 | 15/16 场景 · 15 个 test plan · 87 步 · 14 个全绿 |
+| M7: Driver 扩展 | ✅ 完成 | 调试 · 测试运行器 · Hover · 依赖树 · 文件管理器 · Rename · Organize Imports |
+| M8: Wiki 全覆盖 | ✅ 完成 | 16/16 场景 · 16 个 test plan · 93 步 |
+| M9: 审计修复 | 🔲 进行中 | 恢复真实 UI 操作 · 加强验证 · 修复临时 workspace 路径问题 |
