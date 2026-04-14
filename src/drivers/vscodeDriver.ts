@@ -192,12 +192,9 @@ export class VscodeDriver {
     this.page = await this.app.firstWindow();
     // Wait for VSCode workbench to render
     await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: 30_000 });
-
-    // Dismiss all notification toasts that may interfere with UI automation
-    await this.dismissAllNotifications();
   }
 
-  /** Close all visible notification toasts */
+  /** Close all visible notification toasts (rarely needed with --enable-smoke-test-driver) */
   async dismissAllNotifications(): Promise<void> {
     try {
       await this.runCommandFromPalette("Notifications: Clear All Notifications");

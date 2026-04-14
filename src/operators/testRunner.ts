@@ -185,8 +185,6 @@ export class TestRunner {
   private async takeScreenshot(stepId: string, phase: "before" | "after" | "error"): Promise<string | undefined> {
     if (!this.screenshotDir) return undefined;
     try {
-      // Dismiss notifications before every screenshot for clean captures
-      await this.driver.dismissAllNotifications();
       const seq = String(++this.screenshotCounter).padStart(2, "0");
       const fileName = `${seq}_${stepId}_${phase}.png`;
       const filePath = path.join(this.screenshotDir, fileName);
