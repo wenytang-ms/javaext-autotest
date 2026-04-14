@@ -108,6 +108,7 @@ export class VscodeDriver {
       "--skip-release-notes",
       "--disable-workspace-trust",
       "--password-store=basic",
+      "--enable-smoke-test-driver",
       ...baseArgs,
     ];
 
@@ -499,17 +500,27 @@ export class VscodeDriver {
     // Dismiss any active suggest/autocomplete
     await page.keyboard.press("Escape");
 
-    // Use VSCode's internal 'type' command — this is the same path as real keyboard input,
-    // so the Language Server will receive didChange notifications.
-    const success = await page.evaluate(async (t) => {
-      const vscode = (window as any).require?.("vscode");
-      if (!vscode) return false;
-      // 'type' command inserts text at cursor, triggers all editor events including LS sync
-      await vscode.commands.executeCommand("type", { text: t });
+    // Use VSCode's built-in smoke test driver (window.driver.typeInEditor).
+    // This injects text via EditContext/TextUpdateEvent — the same mechanism
+    // used by VSCode's own E2E tests. It properly triggers LS didChange
+    // notifications WITHOUT triggering autocomplete.
+    const driverSuccess = await page.evaluate(async (t) => {
+      const driver = (window as any).driver;
+      if (!driver?.typeInEditor) return false;
+      // Find the active editor's EditContext or textarea element
+      const editContext = document.querySelector(".monaco-editor .native-edit-context");
+      const textarea = document.querySelector(".monaco-editor textarea");
+      const selector = editContext
+        ? ".monaco-editor .native-edit-context"
+        : textarea
+          ? ".monaco-editor textarea"
+          : null;
+      if (!selector) return false;
+      await driver.typeInEditor(selector, t);
       return true;
     }, text);
 
-    if (!success) {
+    if (!driverSuccess) {
       // Fallback: use Monaco executeEdits API
       const editSuccess = await page.evaluate((t) => {
         const editor = (window as any).monaco?.editor?.getEditors?.()?.[0];
