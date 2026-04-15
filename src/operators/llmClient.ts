@@ -121,7 +121,7 @@ export class LLMClient {
           ],
         },
       ],
-      max_tokens: 400,
+      max_completion_tokens: 400,
       temperature: 0.1,
     };
 
@@ -223,7 +223,7 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
         { role: "system", content: "You are a test infrastructure analyst. Analyze E2E test results and provide actionable insights. Be concise and specific." },
         { role: "user", content: prompt },
       ],
-      max_tokens: 600,
+      max_completion_tokens: 600,
       temperature: 0.2,
     };
 

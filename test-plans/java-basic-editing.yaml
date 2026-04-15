@@ -116,17 +116,13 @@ steps:
     verify: "Organize Imports resolved File type"
     timeout: 15
 
-  # Save all and reopen to see the import (LS may write to a second tab)
+  # Save all — LS may write the import to a second tab (dual-tab issue on CI)
+  # Verify via file on disk to bypass dual-tab problem
   - id: "save-after-organize"
     action: "run command File: Save All"
-
-  - id: "close-all-after-organize"
-    action: "run command Workbench: Close All Editors"
-
-  - id: "reopen-app"
-    action: "open file App.java"
-    verify: "App.java shows import java.io.File after Organize Imports"
-    verifyEditor:
+    verify: "App.java on disk contains import java.io.File"
+    verifyFile:
+      path: "~/src/app/App.java"
       contains: "import java.io.File"
     timeout: 10
 

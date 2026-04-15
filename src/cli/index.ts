@@ -136,14 +136,53 @@ program
     const crashedPlans = reports.filter((r: any) => r.crashed).length;
     const failedPlans = totalPlans - passedPlans - crashedPlans;
 
+    // Build markdown summary for Job Summary
+    const mdLines: string[] = [];
+    mdLines.push(`## E2E Test Results`);
+    mdLines.push(``);
+    mdLines.push(`| Status | Test Plan | Steps | Duration |`);
+    mdLines.push(`|--------|-----------|-------|----------|`);
+
     for (const r of reports) {
       const icon = r.crashed ? "💥" : r.summary.failed + r.summary.errors > 0 ? "❌" : "✅";
       const status = r.crashed ? "CRASH" : `${r.summary.passed}/${r.summary.total}`;
+      const dur = `${(r.duration / 1000).toFixed(1)}s`;
+      mdLines.push(`| ${icon} | ${r.planName} | ${status} | ${dur} |`);
       console.log(`  ${icon} ${r.planName}: ${status}`);
     }
+
+    mdLines.push(``);
+    mdLines.push(`**Total: ${totalPlans}** — ✅ ${passedPlans} passed · ❌ ${failedPlans} failed · 💥 ${crashedPlans} crashed`);
     console.log(`\n  Total: ${totalPlans} | ✅ ${passedPlans} | ❌ ${failedPlans} | 💥 ${crashedPlans}`);
 
+    // Failed step details
+    const allFailedSteps = reports.flatMap((r: any) =>
+      (r.results ?? [])
+        .filter((s: any) => s.status === "fail" || s.status === "error")
+        .map((s: any) => ({ plan: r.planName, ...s }))
+    );
+    if (allFailedSteps.length > 0) {
+      mdLines.push(``);
+      mdLines.push(`### Failed Steps`);
+      mdLines.push(``);
+      for (const s of allFailedSteps) {
+        mdLines.push(`- **${s.plan}** → \`${s.stepId}\`: ${s.reason?.substring(0, 150) ?? "unknown"}`);
+      }
+    }
+
+    // Crash details
+    const crashedReports = reports.filter((r: any) => r.crashed);
+    if (crashedReports.length > 0) {
+      mdLines.push(``);
+      mdLines.push(`### Crashes`);
+      mdLines.push(``);
+      for (const r of crashedReports) {
+        mdLines.push(`- **${r.planName}**: ${r.crashReason ?? "VSCode exited before any steps could execute"}`);
+      }
+    }
+
     // LLM aggregate analysis
+    let llmAnalysis = "";
     if (opts.llm !== false && (failedPlans + crashedPlans) > 0) {
       const llm = new LLMClient();
       if (llm.isConfigured()) {
@@ -158,13 +197,26 @@ program
             ?.filter((s: any) => s.status === "fail" || s.status === "error")
             .map((s: any) => ({ stepId: s.stepId, action: s.action, reason: s.reason })),
         }));
-        const analysis = await llm.summarizeResults(analysisInput);
-        console.log(`\n📝 LLM Analysis:\n${analysis}`);
+        llmAnalysis = await llm.summarizeResults(analysisInput);
+        console.log(`\n📝 LLM Analysis:\n${llmAnalysis}`);
 
-        // Save analysis to file
-        const analysisPath = path.join(outputBase, "summary.txt");
-        fs.writeFileSync(analysisPath, analysis);
-        console.log(`📄 Analysis saved → ${analysisPath}`);
+        mdLines.push(``);
+        mdLines.push(`### 🤖 AI Analysis`);
+        mdLines.push(``);
+        mdLines.push(llmAnalysis);
+      }
+    }
+
+    // Save summary.md
+    if (outputBase) {
+      fs.mkdirSync(outputBase, { recursive: true });
+      const mdPath = path.join(outputBase, "summary.md");
+      fs.writeFileSync(mdPath, mdLines.join("\n"));
+      console.log(`📄 Summary → ${mdPath}`);
+
+      if (llmAnalysis) {
+        const txtPath = path.join(outputBase, "summary.txt");
+        fs.writeFileSync(txtPath, llmAnalysis);
       }
     }
 

@@ -56,7 +56,15 @@ export class StepVerifier {
   private async verifyFile(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
     if (!step.verifyFile) return null;
 
-    const filePath = path.resolve(step.verifyFile.path);
+    // Support workspace-relative paths with "~/" prefix
+    let filePath = step.verifyFile.path;
+    if (filePath.startsWith("~/")) {
+      const wsPath = this.driver.getWorkspacePath();
+      if (!wsPath) return { passed: false, reason: "No workspace path available for ~/relative path" };
+      filePath = path.join(wsPath, filePath.substring(2));
+    } else {
+      filePath = path.resolve(filePath);
+    }
     if (step.verifyFile.exists === false) {
       const exists = await this.driver.fileExists(filePath);
       if (exists) return { passed: false, reason: `File should not exist: ${filePath}` };
