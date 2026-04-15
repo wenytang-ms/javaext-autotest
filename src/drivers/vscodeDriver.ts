@@ -103,6 +103,7 @@ export class VscodeDriver {
     const args = [
       "--no-sandbox",
       "--disable-gpu-sandbox",
+      "--disable-gpu",
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",
@@ -570,25 +571,60 @@ export class VscodeDriver {
     await editor.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await editor.click();
 
-    await page.keyboard.type(triggerWord, { delay: 50 });
+    // Try up to 3 times: type trigger word → Ctrl+Space → find snippet
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        // Clear previous attempt
+        const modifier = process.platform === "darwin" ? "Meta" : "Control";
+        await page.keyboard.press(`${modifier}+A`);
+        await page.keyboard.press("Delete");
+        await page.waitForTimeout(500);
+        console.log(`   ⏳ Snippet retry ${attempt + 1}/3...`);
+      }
 
-    // Trigger suggestion and wait for suggest widget
-    await page.keyboard.press(TRIGGER_SUGGEST_KEY);
-    await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+      await page.keyboard.type(triggerWord, { delay: 50 });
+      await page.waitForTimeout(300);
 
-    // Try to find and select the snippet item
-    const snippetOption = page.locator(
-      ".monaco-list-row .suggest-icon.codicon-symbol-snippet"
-    ).first();
-    const hasSnippet = await snippetOption.isVisible().catch(() => false);
+      // Trigger suggestion and wait for suggest widget
+      await page.keyboard.press(TRIGGER_SUGGEST_KEY);
+      const suggestVisible = await page.locator(SUGGEST_WIDGET_SELECTOR)
+        .waitFor({ state: "visible", timeout: 5000 })
+        .then(() => true).catch(() => false);
 
-    if (hasSnippet) {
-      await snippetOption.click();
-    } else {
-      await page.keyboard.press(ENTER_KEY);
+      if (!suggestVisible) continue;
+
+      // Wait a moment for completion items to populate
+      await page.waitForTimeout(500);
+
+      // Try to find and select the snippet item
+      const snippetOption = page.locator(
+        ".monaco-list-row .suggest-icon.codicon-symbol-snippet"
+      ).first();
+      const hasSnippet = await snippetOption.isVisible().catch(() => false);
+
+      if (hasSnippet) {
+        await snippetOption.click();
+        await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+        return;
+      }
+
+      // Dismiss suggest widget before retry
+      await page.keyboard.press("Escape");
+      await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
     }
-    // Wait for suggest widget to close
-    await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+
+    // Fallback: use "Snippets: Insert Snippet" command
+    console.log(`   ⏳ Snippet not found in suggest, using Insert Snippet command...`);
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+A`);
+    await page.keyboard.press("Delete");
+    await this.runCommandFromPalette("Snippets: Insert Snippet");
+    const snippetPicker = page.locator(QUICK_INPUT_SELECTOR);
+    await snippetPicker.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await snippetPicker.fill(triggerWord);
+    await page.waitForTimeout(500);
+    await page.keyboard.press(ENTER_KEY);
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
   /**

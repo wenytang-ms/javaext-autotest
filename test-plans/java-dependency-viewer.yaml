@@ -50,7 +50,12 @@ steps:
     action: "expand JRE System Library tree item"
     verify: "JDK Libraries node visible and expandable"
 
+  # Collapse JRE to free vertical space, then Maven Dependencies becomes visible
+  - id: "collapse-jdk"
+    action: "expand JRE System Library tree item"
+
   # ── Verify Maven Dependencies node ──────────────────────
   - id: "verify-maven-deps"
     action: "expand Maven Dependencies tree item"
     verify: "Maven Dependencies node visible and expandable"
+    timeout: 10
