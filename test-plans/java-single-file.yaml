@@ -43,7 +43,7 @@ steps:
   # wiki: "make sure the editing experience is correctly working
   #        including diagnostics, code completion and code action."
   - id: "verify-completion"
-    action: "triggerCompletion"
+    action: "triggerCompletionAt endOfMethod"
     verify: "Code completion list appears"
     verifyCompletion:
       notEmpty: true

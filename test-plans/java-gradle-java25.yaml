@@ -32,7 +32,9 @@ steps:
   # wiki: "check the status bar icon is 👍, and there should be no errors"
   - id: "ls-ready"
     action: "waitForLanguageServer"
-    verify: "Status bar shows Java Language Server is ready"
+    verify: "Status bar shows Java Language Server is ready with no errors"
+    verifyProblems:
+      errors: 0
     timeout: 300
 
   # ── Step 2: Open Java file ───────────────────────────────
@@ -44,8 +46,8 @@ steps:
 
   # ── Step 3: Verify completion ───────────────────────────
   - id: "verify-completion"
-    action: "triggerCompletion"
-    verify: "Code completion works correctly"
+    action: "triggerCompletionAt endOfMethod"
+    verify: "Code completion works at end of method body"
     verifyCompletion:
       notEmpty: true
 

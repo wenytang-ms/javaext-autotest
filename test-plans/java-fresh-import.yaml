@@ -43,7 +43,7 @@ steps:
     timeout: 15
 
   - id: "verify-completion"
-    action: "triggerCompletion"
+    action: "triggerCompletionAt endOfMethod"
     verify: "Code completion works correctly"
     verifyCompletion:
       notEmpty: true

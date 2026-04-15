@@ -47,7 +47,7 @@ steps:
     timeout: 15
 
   - id: "verify-completion"
-    action: "triggerCompletion"
+    action: "triggerCompletionAt endOfMethod"
     verify: "Completion list appears with reasonable completion items"
     verifyCompletion:
       notEmpty: true

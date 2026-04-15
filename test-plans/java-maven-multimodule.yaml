@@ -45,7 +45,7 @@ steps:
     timeout: 15
 
   - id: "module1-completion"
-    action: "triggerCompletion"
+    action: "triggerCompletionAt endOfMethod"
     verify: "Code completion works for module1 Foo.java"
     verifyCompletion:
       notEmpty: true
@@ -57,7 +57,7 @@ steps:
     timeout: 15
 
   - id: "module2-completion"
-    action: "triggerCompletion"
+    action: "triggerCompletionAt endOfMethod"
     verify: "Code completion works for module2 Foo.java"
     verifyCompletion:
       notEmpty: true

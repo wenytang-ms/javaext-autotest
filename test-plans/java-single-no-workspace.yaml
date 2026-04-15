@@ -43,7 +43,7 @@ steps:
   # wiki: "Try the basic editing features in App.java, they should work."
   # LS may briefly re-enter Searching after Ready; wait before triggering completion
   - id: "verify-completion"
-    action: "triggerCompletion"
+    action: "triggerCompletionAt endOfMethod"
     verify: "Code completion works correctly"
     verifyCompletion:
       notEmpty: true
