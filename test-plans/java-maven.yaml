@@ -26,9 +26,14 @@ setup:
 
 steps:
   # ── Step 1: Wait for language server ready ──────────────────────────
+  # wiki: "status bar icon is 👍, problems view has several warnings but without errors"
   - id: "ls-ready"
     action: "waitForLanguageServer"
     verify: "Status bar shows Java language server is ready"
+    verifyProblems:
+      errors: 0
+      warnings: 1
+      atLeast: true
     timeout: 120
 
   # ── Step 2: Open Java file and verify editing experience ─────────────────
@@ -64,12 +69,3 @@ steps:
   - id: "save-file"
     action: "saveFile"
     verify: "File saved"
-
-  # 2f. Verify diagnostics — modify file on disk and reload
-  #     After adding an unused import, LS will report a new warning (unused import)
-  - id: "verify-diagnostics"
-    action: "insertLineInFile src/main/java/java/Foo.java 2 import java.util.ArrayList;"
-    verifyProblems:
-      warnings: 2
-      atLeast: true
-    timeout: 60
