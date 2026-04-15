@@ -393,6 +393,7 @@ export class VscodeDriver {
     const page = this.getPage();
     const item = page.getByRole("treeitem", { name }).locator("a").first();
     await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await item.scrollIntoViewIfNeeded();
     await item.click();
     await page.waitForTimeout(500);
   }
@@ -402,6 +403,7 @@ export class VscodeDriver {
     const page = this.getPage();
     const item = page.getByRole("treeitem", { name }).locator("a").first();
     await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await item.scrollIntoViewIfNeeded();
     await item.dblclick();
     await page.waitForTimeout(500);
   }

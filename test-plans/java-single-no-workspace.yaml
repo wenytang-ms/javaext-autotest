@@ -41,11 +41,14 @@ steps:
 
   # ── Step 3: Verify basic editing features ────────────────────────────
   # wiki: "Try the basic editing features in App.java, they should work."
+  # LS may briefly re-enter Searching after Ready; wait before triggering completion
   - id: "verify-completion"
     action: "triggerCompletion"
     verify: "Code completion works correctly"
     verifyCompletion:
       notEmpty: true
+    waitBefore: 5
+    timeout: 30
 
   # ── Step 4: Verify editing ────────────────────────────────────
   - id: "goto-line"
