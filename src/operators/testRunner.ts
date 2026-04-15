@@ -62,6 +62,8 @@ export class TestRunner {
   async run(): Promise<TestReport> {
     const startTime = new Date();
     const results: StepResult[] = [];
+    let crashed = false;
+    let crashReason = "";
 
     // Prepare output directory — clean stale data from previous runs
     if (this.outputDir) {
@@ -97,7 +99,10 @@ export class TestRunner {
         }
       }
     } catch (e) {
-      console.error(`\n💥 Fatal error: ${(e as Error).message}`);
+      const errorMsg = (e as Error).message;
+      console.error(`\n💥 Fatal error: ${errorMsg}`);
+      crashed = true;
+      crashReason = errorMsg;
     } finally {
       await this.driver.close();
     }
@@ -111,7 +116,18 @@ export class TestRunner {
       errors: results.filter((r) => r.status === "error").length,
     };
 
-    console.log(`\n📊 Results: ${summary.passed}/${summary.total} passed`);
+    // Detect crash: plan has steps but none executed
+    if (!crashed && results.length === 0 && this.plan.steps.length > 0) {
+      crashed = true;
+      crashReason = crashReason || "VSCode exited before any steps could execute";
+    }
+
+    if (crashed) {
+      console.log(`\n💥 CRASHED: ${crashReason}`);
+      console.log(`   ${this.plan.steps.length} step(s) were skipped`);
+    } else {
+      console.log(`\n📊 Results: ${summary.passed}/${summary.total} passed`);
+    }
 
     // Post-analysis: use LLM to analyze failed/error steps and provide suggestions
     if (this.llm?.isConfigured() && (summary.failed + summary.errors) > 0 && this.screenshotDir) {
@@ -128,6 +144,7 @@ export class TestRunner {
       endTime: endTime.toISOString(),
       duration: endTime.getTime() - startTime.getTime(),
       results,
+      ...(crashed ? { crashed: true, crashReason } : {}),
       summary,
     };
 

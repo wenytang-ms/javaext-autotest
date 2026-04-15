@@ -167,4 +167,78 @@ export class LLMClient {
       throw e;
     }
   }
+
+  /**
+   * Generate an aggregate analysis of multiple test plan results.
+   * Identifies patterns, root causes, and actionable recommendations.
+   */
+  async summarizeResults(reports: Array<{
+    planName: string;
+    duration: number;
+    crashed?: boolean;
+    crashReason?: string;
+    summary: { total: number; passed: number; failed: number; errors: number };
+    failedSteps?: Array<{ stepId: string; action: string; reason?: string }>;
+  }>): Promise<string> {
+    if (!this.isConfigured()) {
+      return "LLM not configured — skipping aggregate analysis";
+    }
+
+    const reportSummary = reports.map(r => {
+      const status = r.crashed ? "CRASHED" : r.summary.failed + r.summary.errors > 0 ? "FAILED" : "PASSED";
+      let line = `${status} | ${r.planName} | ${r.summary.passed}/${r.summary.total} steps | ${(r.duration / 1000).toFixed(1)}s`;
+      if (r.crashed) line += ` | Crash: ${r.crashReason}`;
+      if (r.failedSteps?.length) {
+        line += `\n  Failed steps:`;
+        for (const s of r.failedSteps) {
+          line += `\n    - [${s.stepId}] ${s.action}: ${s.reason?.substring(0, 150) ?? "unknown"}`;
+        }
+      }
+      return line;
+    }).join("\n");
+
+    const totalPlans = reports.length;
+    const passed = reports.filter(r => !r.crashed && r.summary.failed + r.summary.errors === 0).length;
+    const crashed = reports.filter(r => r.crashed).length;
+    const failed = totalPlans - passed - crashed;
+
+    const prompt = `Analyze these E2E test results for VSCode Java extensions.
+
+Overall: ${passed}/${totalPlans} passed, ${failed} failed, ${crashed} crashed
+
+Results per test plan:
+${reportSummary}
+
+Provide a concise analysis with:
+1. **Health Summary** — one-line overall assessment
+2. **Anomalies** — patterns like consecutive crashes, suspiciously fast durations, or recurring errors
+3. **Root Causes** — likely causes for failures/crashes (e.g., process leak, LS timing, DOM changes)
+4. **Recommendations** — specific, actionable fixes (max 3)
+
+Keep it concise (under 300 words). Use plain text, no markdown.`;
+
+    const url = `${this.endpoint.replace(/\/$/, "")}/openai/deployments/${this.deployment}/chat/completions?api-version=${this.apiVersion}`;
+    const body = {
+      messages: [
+        { role: "system", content: "You are a test infrastructure analyst. Analyze E2E test results and provide actionable insights. Be concise and specific." },
+        { role: "user", content: prompt },
+      ],
+      max_tokens: 600,
+      temperature: 0.2,
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "api-key": this.apiKey },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return `LLM analysis failed (${response.status}): ${errorText.slice(0, 200)}`;
+    }
+
+    const data = await response.json() as { choices: Array<{ message: { content: string } }> };
+    return data.choices?.[0]?.message?.content ?? "No analysis generated";
+  }
 }

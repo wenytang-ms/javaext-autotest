@@ -135,6 +135,9 @@ export interface TestReport {
   endTime: string;
   duration: number;
   results: StepResult[];
+  /** Set when VSCode crashed before any steps could run */
+  crashed?: boolean;
+  crashReason?: string;
   summary: {
     total: number;
     passed: number;
@@ -142,6 +145,8 @@ export interface TestReport {
     skipped: number;
     errors: number;
   };
+  /** LLM-generated analysis of the overall test run (populated by aggregate analysis) */
+  llmAnalysis?: string;
 }
 
 // ─── AI Integration Types ──────────────────────────────────
