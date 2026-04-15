@@ -994,15 +994,53 @@ export class VscodeDriver {
 
   /** Start a debug session (F5 or via command) */
   async startDebugSession(): Promise<void> {
-    await this.getPage().keyboard.press("F5");
-    // Wait for debug toolbar to appear
-    await this.getPage().locator(".debug-toolbar").waitFor({ state: "visible", timeout: 30_000 }).catch(() => {});
+    const page = this.getPage();
+    await page.keyboard.press("F5");
+
+    // Race: debug toolbar (success) vs error dialog (build errors) vs timeout
+    const toolbar = page.locator(".debug-toolbar");
+    const errorDialog = page.locator(".dialog-box");
+
+    // Poll in a loop: check toolbar, dialog, and problems count
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      // Success: debug toolbar appeared
+      if (await toolbar.isVisible().catch(() => false)) {
+        return;
+      }
+
+      // Fail fast: error dialog appeared (e.g., "Build errors exist")
+      if (await errorDialog.isVisible().catch(() => false)) {
+        const message = await errorDialog.locator(".dialog-message-text").textContent().catch(() => "") ?? "";
+        await page.keyboard.press("Escape");
+        throw new Error(`Debug session failed: ${message || "error dialog appeared"}`);
+      }
+
+      // Fail fast: compilation errors prevent debug from starting
+      // (VSCode silently refuses F5 when there are build errors)
+      const problems = await this.getProblemsCount();
+      if (problems.errors > 0) {
+        throw new Error(`Debug session failed: ${problems.errors} compilation error(s) in project`);
+      }
+
+      await page.waitForTimeout(1000);
+    }
+
+    throw new Error("Debug session failed to start: debug toolbar did not appear within 30s");
   }
 
   /** Stop the current debug session (Shift+F5) */
   async stopDebugSession(): Promise<void> {
-    await this.getPage().keyboard.press("Shift+F5");
-    await this.getPage().locator(".debug-toolbar").waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+    const page = this.getPage();
+    // Only stop if debug toolbar is visible
+    const toolbar = page.locator(".debug-toolbar");
+    const isActive = await toolbar.isVisible().catch(() => false);
+    if (!isActive) {
+      console.log("   ⚠️ No active debug session to stop");
+      return;
+    }
+    await page.keyboard.press("Shift+F5");
+    await toolbar.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
   }
 
   /** Set a breakpoint at a specific line in the current file */
@@ -1026,22 +1064,34 @@ export class VscodeDriver {
     }
   }
 
-  /** Debug step over (F10) */
+  /** Debug step over (F10) — throws if no active debug session */
   async debugStepOver(): Promise<void> {
-    await this.getPage().keyboard.press("F10");
-    await this.getPage().waitForTimeout(500);
+    const page = this.getPage();
+    if (!await page.locator(".debug-toolbar").isVisible().catch(() => false)) {
+      throw new Error("Cannot step over: no active debug session");
+    }
+    await page.keyboard.press("F10");
+    await page.waitForTimeout(500);
   }
 
-  /** Debug step into (F11) */
+  /** Debug step into (F11) — throws if no active debug session */
   async debugStepInto(): Promise<void> {
-    await this.getPage().keyboard.press("F11");
-    await this.getPage().waitForTimeout(500);
+    const page = this.getPage();
+    if (!await page.locator(".debug-toolbar").isVisible().catch(() => false)) {
+      throw new Error("Cannot step into: no active debug session");
+    }
+    await page.keyboard.press("F11");
+    await page.waitForTimeout(500);
   }
 
-  /** Debug step out (Shift+F11) */
+  /** Debug step out (Shift+F11) — throws if no active debug session */
   async debugStepOut(): Promise<void> {
-    await this.getPage().keyboard.press("Shift+F11");
-    await this.getPage().waitForTimeout(500);
+    const page = this.getPage();
+    if (!await page.locator(".debug-toolbar").isVisible().catch(() => false)) {
+      throw new Error("Cannot step out: no active debug session");
+    }
+    await page.keyboard.press("Shift+F11");
+    await page.waitForTimeout(500);
   }
 
   /** Get variable values from the Variables panel */
