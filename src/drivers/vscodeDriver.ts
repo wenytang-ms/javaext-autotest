@@ -30,6 +30,8 @@ export class VscodeDriver {
   private app: ElectronApplication | null = null;
   private page: Page | null = null;
   private options: VscodeDriverOptions;
+  /** PID of the launched VSCode process — used for targeted cleanup */
+  private launchedPid: number | null = null;
   /** Temp copy of workspace — cleaned up on close() */
   private tempWorkspaceDir: string | null = null;
   /** Git worktree path — cleaned up on close() */
@@ -190,6 +192,9 @@ export class VscodeDriver {
       args,
     });
 
+    // Track the main process PID for targeted cleanup on close
+    this.launchedPid = this.app.process().pid ?? null;
+
     this.page = await this.app.firstWindow();
     // Wait for VSCode workbench to render
     await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: 30_000 });
@@ -203,10 +208,33 @@ export class VscodeDriver {
   }
 
   async close(): Promise<void> {
+    const pid = this.launchedPid;
     if (this.app) {
-      await this.app.close();
+      try {
+        await this.app.close();
+      } catch { /* may already be closed */ }
       this.app = null;
       this.page = null;
+    }
+
+    // Ensure the process tree is fully dead — prevents stale processes
+    // from blocking the next test's VSCode launch
+    if (pid) {
+      this.launchedPid = null;
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        // Check if process is still alive
+        process.kill(pid, 0);
+        // Still alive — force kill the process tree
+        if (process.platform === "win32") {
+          execSync(`taskkill /F /T /PID ${pid}`, { stdio: "ignore" });
+        } else {
+          execSync(`kill -9 -${pid}`, { stdio: "ignore" });
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      } catch {
+        // Process already exited — good
+      }
     }
     // Clean up git worktree
     if (this.worktreeRoot) {
