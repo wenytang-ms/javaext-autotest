@@ -793,27 +793,47 @@ export class VscodeDriver {
     const page = this.getPage();
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
-    await page.keyboard.press(`${modifier}+.`);
+    // Ensure editor has focus
+    await page.keyboard.press(`${modifier}+1`);
+    await page.waitForTimeout(500);
 
-    // Wait for code action menu to appear
-    const actionItem = page.getByRole("option", { name: label }).first();
-    try {
-      await actionItem.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-      await actionItem.click();
-    } catch {
-      // Fallback: type in the filter and press Enter
-      const filterInput = page.locator(
-        ".context-view .monaco-inputbox input, .quick-input-box input"
-      ).first();
-      const hasFilter = await filterInput.isVisible().catch(() => false);
-      if (hasFilter) {
-        await filterInput.fill(label);
-        await page.waitForTimeout(300);
-      }
-      await page.keyboard.press(ENTER_KEY);
+    // Click lightbulb if visible, otherwise Ctrl+.
+    const lightbulb = page.locator(".lightBulbWidget .codicon");
+    if (await lightbulb.isVisible().catch(() => false)) {
+      await lightbulb.click();
+    } else {
+      await page.keyboard.press(`${modifier}+.`);
     }
 
-    // Wait for code action to be applied
+    // Wait for the code action widget to render
+    const widget = page.locator(".action-widget").first();
+    await widget.waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+
+    // Search for the action by inner text using page.evaluate (bypasses shadow DOM)
+    const found = await page.evaluate((lbl) => {
+      const widgets = document.querySelectorAll(".action-widget");
+      for (const w of widgets) {
+        const items = w.querySelectorAll("li, [role='option'], .focused-item, .action-item");
+        for (const item of items) {
+          const text = item.textContent ?? "";
+          if (text.includes(lbl)) {
+            (item as HTMLElement).click();
+            return true;
+          }
+        }
+      }
+      return false;
+    }, label);
+
+    if (found) {
+      await page.waitForTimeout(1000);
+      return;
+    }
+
+    // Fallback: press Enter to select the highlighted (first) action
+    console.log(`   ⚠️ Could not find "${label}" by text, pressing Enter for first action`);
+    await page.keyboard.press(ENTER_KEY);
     await page.waitForTimeout(1000);
   }
 
@@ -1189,8 +1209,13 @@ export class VscodeDriver {
     const target = page.locator(".monaco-editor .view-lines").getByText(text, { exact: false }).first();
     await target.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await target.hover();
-    // Wait for hover widget to appear
-    await page.locator(".monaco-hover").waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    // Wait for hover widget to appear — throw if it doesn't
+    const hoverWidget = page.locator(".monaco-hover");
+    const visible = await hoverWidget.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT })
+      .then(() => true).catch(() => false);
+    if (!visible) {
+      throw new Error(`Hover popup did not appear for "${text}"`);
+    }
   }
 
   /** Get the content of the hover popup */
