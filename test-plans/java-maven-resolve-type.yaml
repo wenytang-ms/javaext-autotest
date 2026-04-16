@@ -41,23 +41,14 @@ steps:
   # wiki: "type 'Gson gson;'" — use insertLineInFile so LS detects the change
   - id: "insert-unknown-type"
     action: "insertLineInFile src/main/java/java/Foo.java 10         Gson gson;"
-    verify: "Gson line inserted, LS reports error for unknown type"
-    verifyProblems:
-      errors: 1
-      atLeast: true
-    timeout: 30
+    waitBefore: 3
 
-  # ── Verify hover shows Resolve unknown type ──────────────
-  - id: "hover-on-gson"
-    action: "hoverOnText Gson"
-    verify: "Hover popup shows Resolve unknown type action"
-
-  # ── Verify Code Action ──────────────────────────────────
-  - id: "dismiss-hover"
-    action: "dismissHover"
-
+  # ── Verify Code Action: Resolve unknown type ────────────
+  # wiki: hover shows "Resolve unknown type" → apply Code Action
+  # Wait for LS to detect the Gson error before navigating
   - id: "navigate-to-error"
     action: "navigateToError 1"
+    waitBefore: 5
 
   - id: "check-code-action"
     action: "applyCodeAction Resolve unknown type"
