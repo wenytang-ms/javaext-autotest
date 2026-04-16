@@ -153,6 +153,43 @@ export class StepVerifier {
   private async verifyCompletion(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
     if (!step.verifyCompletion) return null;
 
+    const maxWait = (step.timeout ?? 30) * 1000;
+    const pollInterval = 3000;
+    const deadline = Date.now() + maxWait;
+
+    while (Date.now() < deadline) {
+      const items = await this.driver.triggerCompletion();
+      await this.driver.dismissCompletion();
+
+      if (step.verifyCompletion.notEmpty && items.length === 0) {
+        // Empty list — LS may still be loading, retry
+        console.log(`   ⏳ Completion empty, retrying...`);
+        await this.driver.wait(pollInterval / 1000);
+        continue;
+      }
+
+      if (step.verifyCompletion.contains) {
+        let allFound = true;
+        for (const expected of step.verifyCompletion.contains) {
+          const found = items.some((item) =>
+            item.toLowerCase().includes(expected.toLowerCase())
+          );
+          if (!found) {
+            allFound = false;
+            break;
+          }
+        }
+        if (!allFound) {
+          console.log(`   ⏳ Completion missing expected items, retrying...`);
+          await this.driver.wait(pollInterval / 1000);
+          continue;
+        }
+      }
+
+      return { passed: true };
+    }
+
+    // Final attempt for error message
     const items = await this.driver.triggerCompletion();
     await this.driver.dismissCompletion();
 
