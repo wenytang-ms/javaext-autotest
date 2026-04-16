@@ -13,6 +13,70 @@ import * as path from "node:path";
 import { loadTestPlan, validateTestPlanFile } from "../operators/planParser.js";
 import { TestRunner } from "../operators/testRunner.js";
 
+/** Generate markdown summary from test reports */
+function generateSummary(reports: Array<any>): {
+  mdLines: string[];
+  failed: string[];
+  passedPlans: number;
+  failedPlans: number;
+  crashedPlans: number;
+} {
+  const totalPlans = reports.length;
+  const passedPlans = reports.filter((r: any) => !r.crashed && r.summary.failed + r.summary.errors === 0).length;
+  const crashedPlans = reports.filter((r: any) => r.crashed).length;
+  const failedPlans = totalPlans - passedPlans - crashedPlans;
+  const failed: string[] = [];
+
+  const mdLines: string[] = [];
+  mdLines.push(`## E2E Test Results`);
+  mdLines.push(``);
+  mdLines.push(`| Status | Test Plan | Steps | Duration |`);
+  mdLines.push(`|--------|-----------|-------|----------|`);
+
+  for (const r of reports) {
+    const icon = r.crashed ? "💥" : r.summary.failed + r.summary.errors > 0 ? "❌" : "✅";
+    const status = r.crashed ? "CRASH" : `${r.summary.passed}/${r.summary.total}`;
+    const dur = `${(r.duration / 1000).toFixed(1)}s`;
+    mdLines.push(`| ${icon} | ${r.planName} | ${status} | ${dur} |`);
+    console.log(`  ${icon} ${r.planName}: ${status}`);
+    if (r.crashed || r.summary.failed + r.summary.errors > 0) {
+      failed.push(r.planName);
+    }
+  }
+
+  mdLines.push(``);
+  mdLines.push(`**Total: ${totalPlans}** — ✅ ${passedPlans} passed · ❌ ${failedPlans} failed · 💥 ${crashedPlans} crashed`);
+  console.log(`\n  Total: ${totalPlans} | ✅ ${passedPlans} | ❌ ${failedPlans} | 💥 ${crashedPlans}`);
+
+  // Failed step details
+  const allFailedSteps = reports.flatMap((r: any) =>
+    (r.results ?? [])
+      .filter((s: any) => s.status === "fail" || s.status === "error")
+      .map((s: any) => ({ plan: r.planName, ...s }))
+  );
+  if (allFailedSteps.length > 0) {
+    mdLines.push(``);
+    mdLines.push(`### Failed Steps`);
+    mdLines.push(``);
+    for (const s of allFailedSteps) {
+      mdLines.push(`- **${s.plan}** → \`${s.stepId}\`: ${s.reason?.substring(0, 150) ?? "unknown"}`);
+    }
+  }
+
+  // Crash details
+  const crashedReports = reports.filter((r: any) => r.crashed);
+  if (crashedReports.length > 0) {
+    mdLines.push(``);
+    mdLines.push(`### Crashes`);
+    mdLines.push(``);
+    for (const r of crashedReports) {
+      mdLines.push(`- **${r.planName}**: ${r.crashReason ?? "VSCode exited before any steps could execute"}`);
+    }
+  }
+
+  return { mdLines, failed, passedPlans, failedPlans, crashedPlans };
+}
+
 const program = new Command();
 
 program
@@ -131,58 +195,10 @@ program
     console.log(`\n${"=".repeat(60)}`);
     console.log("  AGGREGATE SUMMARY");
     console.log(`${"=".repeat(60)}`);
-    const totalPlans = reports.length;
-    const passedPlans = reports.filter((r: any) => !r.crashed && r.summary.failed + r.summary.errors === 0).length;
-    const crashedPlans = reports.filter((r: any) => r.crashed).length;
-    const failedPlans = totalPlans - passedPlans - crashedPlans;
 
-    // Build markdown summary for Job Summary
-    const mdLines: string[] = [];
-    mdLines.push(`## E2E Test Results`);
-    mdLines.push(``);
-    mdLines.push(`| Status | Test Plan | Steps | Duration |`);
-    mdLines.push(`|--------|-----------|-------|----------|`);
-
-    for (const r of reports) {
-      const icon = r.crashed ? "💥" : r.summary.failed + r.summary.errors > 0 ? "❌" : "✅";
-      const status = r.crashed ? "CRASH" : `${r.summary.passed}/${r.summary.total}`;
-      const dur = `${(r.duration / 1000).toFixed(1)}s`;
-      mdLines.push(`| ${icon} | ${r.planName} | ${status} | ${dur} |`);
-      console.log(`  ${icon} ${r.planName}: ${status}`);
-    }
-
-    mdLines.push(``);
-    mdLines.push(`**Total: ${totalPlans}** — ✅ ${passedPlans} passed · ❌ ${failedPlans} failed · 💥 ${crashedPlans} crashed`);
-    console.log(`\n  Total: ${totalPlans} | ✅ ${passedPlans} | ❌ ${failedPlans} | 💥 ${crashedPlans}`);
-
-    // Failed step details
-    const allFailedSteps = reports.flatMap((r: any) =>
-      (r.results ?? [])
-        .filter((s: any) => s.status === "fail" || s.status === "error")
-        .map((s: any) => ({ plan: r.planName, ...s }))
-    );
-    if (allFailedSteps.length > 0) {
-      mdLines.push(``);
-      mdLines.push(`### Failed Steps`);
-      mdLines.push(``);
-      for (const s of allFailedSteps) {
-        mdLines.push(`- **${s.plan}** → \`${s.stepId}\`: ${s.reason?.substring(0, 150) ?? "unknown"}`);
-      }
-    }
-
-    // Crash details
-    const crashedReports = reports.filter((r: any) => r.crashed);
-    if (crashedReports.length > 0) {
-      mdLines.push(``);
-      mdLines.push(`### Crashes`);
-      mdLines.push(``);
-      for (const r of crashedReports) {
-        mdLines.push(`- **${r.planName}**: ${r.crashReason ?? "VSCode exited before any steps could execute"}`);
-      }
-    }
+    const { mdLines, failed: failedNames, failedPlans, crashedPlans } = generateSummary(reports);
 
     // LLM aggregate analysis
-    let llmAnalysis = "";
     if (opts.llm !== false && (failedPlans + crashedPlans) > 0) {
       const llm = new LLMClient();
       if (llm.isConfigured()) {
@@ -197,13 +213,12 @@ program
             ?.filter((s: any) => s.status === "fail" || s.status === "error")
             .map((s: any) => ({ stepId: s.stepId, action: s.action, reason: s.reason })),
         }));
-        llmAnalysis = await llm.summarizeResults(analysisInput);
-        console.log(`\n📝 LLM Analysis:\n${llmAnalysis}`);
-
+        const analysis = await llm.summarizeResults(analysisInput);
+        console.log(`\n📝 LLM Analysis:\n${analysis}`);
         mdLines.push(``);
         mdLines.push(`### 🤖 AI Analysis`);
         mdLines.push(``);
-        mdLines.push(llmAnalysis);
+        mdLines.push(analysis);
       }
     }
 
@@ -213,12 +228,70 @@ program
       const mdPath = path.join(outputBase, "summary.md");
       fs.writeFileSync(mdPath, mdLines.join("\n"));
       console.log(`📄 Summary → ${mdPath}`);
+    }
 
-      if (llmAnalysis) {
-        const txtPath = path.join(outputBase, "summary.txt");
-        fs.writeFileSync(txtPath, llmAnalysis);
+    process.exit(failedNames.length > 0 ? 1 : 0);
+  });
+
+program
+  .command("analyze <dir>")
+  .description("Analyze existing test results and generate aggregate summary with LLM")
+  .option("--output <dir>", "Output directory for summary (default: same as input dir)")
+  .option("--no-llm", "Skip LLM analysis")
+  .action(async (dir: string, opts: { output?: string; llm?: boolean }) => {
+    const { LLMClient } = await import("../operators/llmClient.js");
+    const resolvedDir = path.resolve(dir);
+    const outputBase = opts.output ? path.resolve(opts.output) : resolvedDir;
+
+    // Scan for results.json in subdirectories
+    const reports: Array<any> = [];
+    const entries = fs.readdirSync(resolvedDir, { withFileTypes: true });
+    for (const entry of entries.filter(e => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
+      const jsonPath = path.join(resolvedDir, entry.name, "results.json");
+      if (fs.existsSync(jsonPath)) {
+        const report = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
+        reports.push(report);
       }
     }
+
+    if (reports.length === 0) {
+      console.error(`❌ No results.json found in subdirectories of ${resolvedDir}`);
+      process.exit(1);
+    }
+
+    console.log(`📋 Found ${reports.length} test result(s)\n`);
+
+    const { mdLines, failed, passedPlans, failedPlans, crashedPlans } = generateSummary(reports);
+
+    // LLM aggregate analysis
+    if (opts.llm !== false && (failedPlans + crashedPlans) > 0) {
+      const llm = new LLMClient();
+      if (llm.isConfigured()) {
+        console.log(`\n🤖 Generating LLM analysis...`);
+        const analysisInput = reports.map((r: any) => ({
+          planName: r.planName,
+          duration: r.duration,
+          crashed: r.crashed,
+          crashReason: r.crashReason,
+          summary: r.summary,
+          failedSteps: r.results
+            ?.filter((s: any) => s.status === "fail" || s.status === "error")
+            .map((s: any) => ({ stepId: s.stepId, action: s.action, reason: s.reason })),
+        }));
+        const analysis = await llm.summarizeResults(analysisInput);
+        console.log(`\n📝 LLM Analysis:\n${analysis}`);
+        mdLines.push(``);
+        mdLines.push(`### 🤖 AI Analysis`);
+        mdLines.push(``);
+        mdLines.push(analysis);
+      }
+    }
+
+    // Save summary.md
+    fs.mkdirSync(outputBase, { recursive: true });
+    const mdPath = path.join(outputBase, "summary.md");
+    fs.writeFileSync(mdPath, mdLines.join("\n"));
+    console.log(`📄 Summary → ${mdPath}`);
 
     process.exit(failed.length > 0 ? 1 : 0);
   });
