@@ -1008,6 +1008,19 @@ export class VscodeDriver {
     await this.runCommandFromPalette("File: Revert File");
   }
 
+  /** Delete a file from the workspace on disk */
+  async deleteFile(relativePath: string): Promise<void> {
+    const wsPath = this.getWorkspacePath();
+    if (!wsPath) throw new Error("No workspace path available");
+    const filePath = path.join(wsPath, relativePath);
+    if (fs.existsSync(filePath)) {
+      fs.rmSync(filePath, { force: true });
+      console.log(`   🗑️ Deleted ${relativePath}`);
+    } else {
+      console.log(`   ⚠️ File not found: ${relativePath}`);
+    }
+  }
+
   // ═══════════════════════════════════════════════════════
   //  Debugging operations
   // ═══════════════════════════════════════════════════════

@@ -93,6 +93,10 @@ export class ActionResolver {
           await d.insertLineInFile(m[1], parseInt(m[2], 10), m[3].trim());
         },
       },
+      {
+        regex: /(?:deleteFile|删除文件)\s+(.+)/i,
+        handler: async (m) => { await d.deleteFile(m[1].trim()); },
+      },
 
       // ── Wait ──
       // IMPORTANT: waitForLanguageServer must be before generic "wait" pattern

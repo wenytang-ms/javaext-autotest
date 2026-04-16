@@ -26,10 +26,21 @@ setup:
   timeout: 60
 
 steps:
+  # ── Remove files that cause compilation errors ──────────
+  # simple-app has Bar.java and Foo.java with unresolved references
+  # Delete them so App.java compiles cleanly for debugging
+  - id: "delete-bar"
+    action: "deleteFile src/app/Bar.java"
+
+  - id: "delete-foo"
+    action: "deleteFile src/app/Foo.java"
+
   # ── Wait for LS ready ────────────────────────────────────
   - id: "ls-ready"
     action: "waitForLanguageServer"
-    verify: "Status bar shows Java Language Server is ready"
+    verify: "Status bar shows Java Language Server is ready with no errors"
+    verifyProblems:
+      errors: 0
     timeout: 120
 
   # ── Open App.java ────────────────────────────────────────
