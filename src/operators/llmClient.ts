@@ -121,7 +121,7 @@ export class LLMClient {
           ],
         },
       ],
-      max_completion_tokens: 400,
+      max_completion_tokens: 800,
     };
 
     try {

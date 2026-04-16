@@ -1319,17 +1319,23 @@ export class VscodeDriver {
     if (!gitRoot) return null;
 
     const tmpDir = os.tmpdir();
-    const worktreeDir = path.join(tmpDir, "autotest-worktree");
 
-    // Clean up any previous worktree
+    // Clean up ALL stale autotest-worktree-* directories from previous runs
     try {
-      execSync(`git worktree remove "${worktreeDir}" --force`, {
-        cwd: gitRoot, stdio: "pipe",
-      });
-    } catch { /* may not exist */ }
-    if (fs.existsSync(worktreeDir)) {
-      fs.rmSync(worktreeDir, { recursive: true, force: true });
-    }
+      for (const entry of fs.readdirSync(tmpDir)) {
+        if (entry.startsWith("autotest-worktree")) {
+          const stale = path.join(tmpDir, entry);
+          try {
+            execSync(`git worktree remove "${stale}" --force`, { cwd: gitRoot, stdio: "pipe" });
+          } catch { /* may not be a worktree */ }
+          try { fs.rmSync(stale, { recursive: true, force: true }); } catch { /* EBUSY — skip */ }
+        }
+      }
+    } catch { /* ignore readdir errors */ }
+
+    // Use unique name to prevent conflicts between consecutive test plans
+    const suffix = Math.random().toString(36).substring(2, 8);
+    const worktreeDir = path.join(tmpDir, `autotest-worktree-${suffix}`);
 
     // Create new worktree from HEAD
     try {
