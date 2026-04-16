@@ -38,19 +38,14 @@ steps:
     timeout: 15
 
   # ── Type unknown type ─────────────────────────────────────────
-  # wiki: "type 'Gson gson;'"
-  - id: "goto-insert"
-    action: "goToLine 10"
-
-  - id: "goto-end"
-    action: "goToEndOfLine"
-
-  - id: "type-unknown-type"
-    action: "typeInEditor \n        Gson gson;"
-
-  - id: "save-file"
-    action: "saveFile"
-    verify: "File saved, LS starts analyzing"
+  # wiki: "type 'Gson gson;'" — use insertLineInFile so LS detects the change
+  - id: "insert-unknown-type"
+    action: "insertLineInFile src/main/java/java/Foo.java 10         Gson gson;"
+    verify: "Gson line inserted, LS reports error for unknown type"
+    verifyProblems:
+      errors: 1
+      atLeast: true
+    timeout: 30
 
   # ── Verify hover shows Resolve unknown type ──────────────
   - id: "hover-on-gson"
