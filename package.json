@@ -10,6 +10,7 @@
   },
   "files": [
     "dist",
+    "test-plans",
     "README.md"
   ],
   "keywords": [

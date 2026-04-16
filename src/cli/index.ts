@@ -91,12 +91,23 @@ program
   .option("--interactive", "Step-by-step execution with manual confirmation")
   .option("--output <dir>", "Output directory (default: ./test-results/<plan-name>)")
   .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean }) => {
+  .option("--vsix <paths>", "Comma-separated VSIX file paths to install (overrides marketplace versions)")
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; vsix?: string }) => {
     try {
       const plan = loadTestPlan(planPath);
+
+      // Append --vsix paths to plan's vsix list
+      if (opts.vsix) {
+        const vsixPaths = opts.vsix.split(",").map(p => p.trim()).filter(Boolean);
+        plan.setup.vsix = [...(plan.setup.vsix ?? []), ...vsixPaths];
+      }
+
       console.log(`📋 Test Plan: ${plan.name}`);
       console.log(`   Extension: ${plan.setup.extension}`);
       console.log(`   Steps: ${plan.steps.length}`);
+      if (plan.setup.vsix?.length) {
+        console.log(`   VSIX: ${plan.setup.vsix.join(", ")}`);
+      }
 
       // Derive output dir from plan file name: test-results/<plan-name>/
       const planName = path.basename(planPath, path.extname(planPath));
