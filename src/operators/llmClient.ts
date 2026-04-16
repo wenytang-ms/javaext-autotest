@@ -122,7 +122,6 @@ export class LLMClient {
         },
       ],
       max_completion_tokens: 400,
-      temperature: 0.1,
     };
 
     try {
@@ -224,7 +223,6 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
         { role: "user", content: prompt },
       ],
       max_completion_tokens: 600,
-      temperature: 0.2,
     };
 
     const response = await fetch(url, {
