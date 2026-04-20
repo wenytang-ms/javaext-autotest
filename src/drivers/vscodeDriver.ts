@@ -36,6 +36,8 @@ export class VscodeDriver {
   private tempWorkspaceDir: string | null = null;
   /** Git worktree path — cleaned up on close() */
   private worktreeRoot: string | null = null;
+  /** Ad-hoc capture store for cross-step state (e.g. captured mtimes). */
+  private captures: Map<string, unknown> = new Map();
 
   constructor(options: VscodeDriverOptions = {}) {
     this.options = {
@@ -952,6 +954,25 @@ export class VscodeDriver {
   /** Read file content */
   async readFile(filePath: string): Promise<string> {
     return fs.readFileSync(filePath, "utf-8");
+  }
+
+  /** Get a file's modification time in epoch ms, or null if missing. */
+  async getFileMtime(filePath: string): Promise<number | null> {
+    try {
+      return fs.statSync(filePath).mtimeMs;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Store an arbitrary value under a key for later retrieval. */
+  captureValue(key: string, value: unknown): void {
+    this.captures.set(key, value);
+  }
+
+  /** Retrieve a previously stored capture (or undefined if not set). */
+  getCapturedValue(key: string): unknown {
+    return this.captures.get(key);
   }
 
   /** Get the workspace root path (worktree or temp copy) */

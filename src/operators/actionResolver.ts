@@ -5,6 +5,7 @@
  * Unmatched actions fall back to Command Palette execution.
  */
 
+import * as path from "node:path";
 import type { VscodeDriver } from "../drivers/vscodeDriver.js";
 
 export interface ActionResolverOptions {
@@ -96,6 +97,29 @@ export class ActionResolver {
       {
         regex: /(?:deleteFile|删除文件)\s+(.+)/i,
         handler: async (m) => { await d.deleteFile(m[1].trim()); },
+      },
+
+      // Record the current mtime of a file under a named key, for later
+      // comparison via a verifyFile with { mtimeAfter: "<key>" } clause.
+      // Example: `captureFileMtime beforeRun ~/module-a/build/test-results/test/TEST-com.example.a.ATest.xml`
+      {
+        regex: /captureFileMtime\s+(\S+)\s+(.+)/i,
+        handler: async (m) => {
+          const key = m[1];
+          let p = m[2].trim();
+          if (p.startsWith("~/")) {
+            const ws = d.getWorkspacePath();
+            if (!ws) throw new Error("captureFileMtime: no workspace path available");
+            p = path.join(ws, p.substring(2));
+          } else {
+            p = path.resolve(p);
+          }
+          const mtime = await d.getFileMtime(p);
+          // Fall back to 0 when the file does not exist yet: any subsequent
+          // write will produce a strictly greater mtime, which is what
+          // `mtimeAfter` checks for.
+          d.captureValue(`mtime:${key}`, mtime ?? 0);
+        },
       },
 
       // ── Wait ──

@@ -56,6 +56,18 @@ export interface FileVerification {
   exists?: boolean;
   contains?: string;
   matches?: string; // regex
+  /**
+   * Current mtime must be strictly greater than this threshold.
+   * - `number` — interpreted as epoch milliseconds.
+   * - `string` — looked up in the driver's capture store (set via
+   *   `captureFileMtime <key> <path>` action).
+   */
+  mtimeAfter?: number | string;
+  /**
+   * Current mtime must be less than or equal to the mtime captured earlier
+   * under the given key. Used to assert a file was NOT modified by a step.
+   */
+  mtimeUnchangedSince?: string;
 }
 
 export interface EditorVerification {

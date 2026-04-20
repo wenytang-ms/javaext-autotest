@@ -75,6 +75,7 @@ steps:
 | `insertLineInFile <path> <line> <text>` | **Disk write + Revert** — LS-aware, reliable |
 | `typeInEditor <text>` | Inject text via EditContext — LS may NOT detect changes |
 | `typeAndTriggerSnippet <word>` | Type + trigger IntelliSense snippet |
+| `captureFileMtime <key> <path>` | Snapshot current mtime for a later `verifyFile: { mtimeAfter: "<key>" }` assertion. Missing file captures `0`. |
 
 ### Navigation
 | Action | Description |
@@ -203,6 +204,17 @@ When renaming a class symbol (e.g., `Foo` → `FooNew`), LS also renames the fil
 - `~/path` → relative to workspace root (handles worktree paths automatically)
 - `absolute/path` → resolved as-is
 - Always use `~/` for workspace files — the actual workspace may be in a temp worktree
+
+Supported assertion fields:
+
+| Field | Meaning |
+|-------|---------|
+| `exists: false` | File must NOT exist |
+| `contains: "<text>"` | File must contain the literal substring |
+| `matches: "<regex>"` | File must match the JS regex (no multi-line flag; use `[\s\S]` if needed) |
+| `mtimeAfter: <n \| "key">` | File's mtime must be strictly greater than a numeric epoch-ms threshold, or the value captured earlier via `captureFileMtime <key> <path>` |
+| `mtimeUnchangedSince: "<key>"` | File's mtime must be ≤ the previously captured value (asserts file was NOT modified) |
+
 
 ### 10. Debug Requires Zero Compilation Errors
 

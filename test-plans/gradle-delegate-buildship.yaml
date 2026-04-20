@@ -1,0 +1,151 @@
+# Test Plan: Delegate Test to Gradle on a Buildship-imported project
+#
+# This plan validates vscode-gradle PR #1810, which decouples "Delegate Test
+# to Gradle" from the Gradle Build Server importer. It regression-tests four
+# specific fixes:
+#
+#   #1 vmArgs configured in java.test.config must reach the forked test JVM
+#      (asserted from inside BTest.vmArgsAndEnvMustReachTestJvm).
+#   #2 env vars configured in java.test.config must reach the forked test JVM
+#      (same Java-side assertion).
+#   #3 Results from every subproject must be scanned, not just the root
+#      (module-a and module-b both produce their own build/test-results).
+#   #5 The parser must ignore stale JUnit XML files from previous runs
+#      (asserted indirectly: after a forced fresh run the mtime must advance).
+#
+# The fixture is imported by Buildship, NOT by the Gradle Build Server
+# (forced via .vscode/settings.json > "java.gradle.buildServer.enabled": "off").
+# Before the PR's fix, invoking the gradle test delegate on this workspace
+# would throw "Project is not a Gradle build server project".
+#
+# Usage:
+#   # Build the patched extension first:
+#   cd ../vscode-gradle && npm ci && npm run build && cd extension && vsce package --no-dependencies
+#   # Then run with the local vsix (fixture lives under vscode-gradle/extension/test/resources/):
+#   cd ../javaext-autotest
+#   npx autotest run test-plans/gradle-delegate-buildship.yaml \
+#     --vsix ../vscode-gradle/extension/vscode-gradle-*.vsix
+
+name: "Gradle: Delegate Test on Buildship-imported multi-project"
+description: |
+  End-to-end validation of vscode-gradle PR #1810. Uses a two-module Gradle
+  fixture forced to import via Buildship; runs the full test suite with the
+  "delegated" java.test.config profile (vmArgs + env vars); asserts that the
+  JUnit XML reports are produced freshly under each module's build directory
+  and that the JVM-side assertions on vmArgs/env pass.
+
+setup:
+  extension: "redhat.java"
+  extensions:
+    - "vscjava.vscode-java-pack"
+  vscodeVersion: "stable"
+  workspace: "../../vscode-gradle/extension/test-fixtures/gradle-delegate-multiproject"
+  timeout: 300
+
+steps:
+  # ── Wait for LS and Buildship import to finish ───────────────
+  - id: "ls-ready"
+    action: "waitForLanguageServer"
+    verify: "Status bar shows Java language server is ready"
+    timeout: 240
+
+  # Buildship drops a .settings/org.eclipse.buildship.core.prefs file into
+  # each imported project. Its presence confirms the workspace was imported
+  # through Buildship rather than the Gradle Build Server (which would have
+  # produced .bsp/ instead).
+  - id: "verify-buildship-import-a"
+    action: "wait 2 seconds"
+    verify: "module-a imported via Buildship"
+    verifyFile:
+      path: "~/module-a/.settings/org.eclipse.buildship.core.prefs"
+      exists: true
+
+  - id: "verify-buildship-import-b"
+    action: "wait 1 seconds"
+    verify: "module-b imported via Buildship"
+    verifyFile:
+      path: "~/module-b/.settings/org.eclipse.buildship.core.prefs"
+      exists: true
+
+  # ── Snapshot current mtime of result XMLs ───────────────────
+  # Captures 0 when the file doesn't exist yet (first run). After the test
+  # run completes the files must exist AND have mtime strictly greater than
+  # this snapshot — which is also what the parser's mtime filter enforces
+  # on the product side.
+  - id: "snapshot-mtime-a"
+    action: "captureFileMtime beforeRun_a ~/module-a/build/test-results/test/TEST-com.example.a.ATest.xml"
+    verify: "Captured pre-run mtime for module-a result"
+
+  - id: "snapshot-mtime-b"
+    action: "captureFileMtime beforeRun_b ~/module-b/build/test-results/test/TEST-com.example.b.BTest.xml"
+    verify: "Captured pre-run mtime for module-b result"
+
+  # ── Run all tests via "Delegate Test to Gradle" ──────────────
+  # java.test.defaultConfig="delegated" (see .vscode/settings.json) ensures
+  # the run picks up our vmArgs/env profile without an extra UI prompt.
+  - id: "open-test-explorer"
+    action: "openTestExplorer"
+    verify: "Test explorer panel opened"
+
+  - id: "run-all-tests"
+    action: "runAllTests"
+    verify: "Test run started (delegated to Gradle)"
+
+  # Buildship import + first Gradle invocation can take a while on a cold
+  # Gradle cache. Give it generous headroom.
+  - id: "wait-test-complete"
+    action: "wait 180 seconds"
+    verify: "Gradle test run finished for both modules"
+
+  # ── Multi-project scan (#3) + fresh results (#5) ─────────────
+  - id: "verify-module-a-result"
+    action: "wait 1 seconds"
+    verify: "module-a produced a fresh JUnit XML with ATest.shouldPass passing"
+    verifyFile:
+      path: "~/module-a/build/test-results/test/TEST-com.example.a.ATest.xml"
+      exists: true
+      contains: 'name="shouldPass"'
+      mtimeAfter: "beforeRun_a"
+
+  - id: "verify-module-a-no-failures"
+    action: "wait 1 seconds"
+    verify: "module-a testsuite reports zero failures and zero errors"
+    verifyFile:
+      path: "~/module-a/build/test-results/test/TEST-com.example.a.ATest.xml"
+      matches: 'failures="0"'
+
+  - id: "verify-module-a-no-errors"
+    action: "wait 1 seconds"
+    verify: "module-a testsuite reports zero errors"
+    verifyFile:
+      path: "~/module-a/build/test-results/test/TEST-com.example.a.ATest.xml"
+      matches: 'errors="0"'
+
+  - id: "verify-module-b-result"
+    action: "wait 1 seconds"
+    verify: "module-b produced a fresh JUnit XML with both test methods"
+    verifyFile:
+      path: "~/module-b/build/test-results/test/TEST-com.example.b.BTest.xml"
+      exists: true
+      contains: 'name="vmArgsAndEnvMustReachTestJvm"'
+      mtimeAfter: "beforeRun_b"
+
+  # ── vmArgs (#1) + env vars (#2) reach the forked test JVM ────
+  # The critical assertion. BTest.vmArgsAndEnvMustReachTestJvm asserts
+  # inside the JVM that System.getProperty("customVmFlag")=="autotest" AND
+  # System.getenv("AUTOTEST_ENV")=="delegated". If either leg of the fix
+  # regresses, this testcase throws and the XML contains <failure>, which
+  # we assert does NOT appear in BTest's result.
+  - id: "verify-vmargs-env-passed"
+    action: "wait 1 seconds"
+    verify: "BTest.vmArgsAndEnvMustReachTestJvm passed — vmArgs+env reached the test JVM"
+    verifyFile:
+      path: "~/module-b/build/test-results/test/TEST-com.example.b.BTest.xml"
+      matches: 'failures="0"'
+
+  - id: "verify-vmargs-env-no-errors"
+    action: "wait 1 seconds"
+    verify: "BTest.vmArgsAndEnvMustReachTestJvm did not error"
+    verifyFile:
+      path: "~/module-b/build/test-results/test/TEST-com.example.b.BTest.xml"
+      matches: 'errors="0"'

@@ -78,6 +78,51 @@ export class StepVerifier {
           return { passed: false, reason: `File does not contain: "${step.verifyFile.contains}"` };
         }
       }
+      if (step.verifyFile.matches) {
+        const content = await this.driver.readFile(filePath);
+        const re = new RegExp(step.verifyFile.matches);
+        if (!re.test(content)) {
+          return { passed: false, reason: `File does not match regex: /${step.verifyFile.matches}/` };
+        }
+      }
+      if (step.verifyFile.mtimeAfter !== undefined) {
+        const currentMtime = await this.driver.getFileMtime(filePath);
+        if (currentMtime === null) {
+          return { passed: false, reason: `Cannot stat file: ${filePath}` };
+        }
+        let threshold: number | undefined;
+        if (typeof step.verifyFile.mtimeAfter === "number") {
+          threshold = step.verifyFile.mtimeAfter;
+        } else {
+          const captured = this.driver.getCapturedValue(`mtime:${step.verifyFile.mtimeAfter}`);
+          if (typeof captured !== "number") {
+            return { passed: false, reason: `No captured mtime under key "${step.verifyFile.mtimeAfter}"; did you run captureFileMtime first?` };
+          }
+          threshold = captured;
+        }
+        if (!(currentMtime > threshold)) {
+          return {
+            passed: false,
+            reason: `File mtime (${currentMtime}) is not after threshold (${threshold}); delta=${currentMtime - threshold}ms. File was not (re)written: ${filePath}`,
+          };
+        }
+      }
+      if (step.verifyFile.mtimeUnchangedSince) {
+        const currentMtime = await this.driver.getFileMtime(filePath);
+        if (currentMtime === null) {
+          return { passed: false, reason: `Cannot stat file: ${filePath}` };
+        }
+        const captured = this.driver.getCapturedValue(`mtime:${step.verifyFile.mtimeUnchangedSince}`);
+        if (typeof captured !== "number") {
+          return { passed: false, reason: `No captured mtime under key "${step.verifyFile.mtimeUnchangedSince}"` };
+        }
+        if (currentMtime > captured) {
+          return {
+            passed: false,
+            reason: `File was modified after capture: mtime ${currentMtime} > captured ${captured} (delta=${currentMtime - captured}ms)`,
+          };
+        }
+      }
     }
     return { passed: true };
   }
