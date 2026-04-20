@@ -32,17 +32,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump version
+      - name: Bump version and push
         id: version
         run: |
           BUMP_TYPE=${{ inputs.patch == true && 'patch' || 'minor' }}
           npm version $BUMP_TYPE -m "chore: release v%s"
-          echo "tag=v$(node -p 'require(\"./package.json\").version')" >> "$GITHUB_OUTPUT"
-
-      - name: Push changes and tag
-        run: |
+          TAG="v$(node -p 'require("./package.json").version')"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           git push origin HEAD
-          git push origin ${{ steps.version.outputs.tag }}
+          git push origin "$TAG"
 
       - name: Publish to npm
         run: npm publish
