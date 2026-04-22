@@ -92,9 +92,38 @@ program
   .option("--output <dir>", "Output directory (default: ./test-results/<plan-name>)")
   .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install (overrides marketplace versions)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; vsix?: string }) => {
+  .option("--override <kv...>", "Override setup fields (e.g. --override extensionPath=../../vscode-java extension=redhat.java)")
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; vsix?: string; override?: string[] }) => {
     try {
       const plan = loadTestPlan(planPath);
+
+      // Apply --override key=value pairs to setup fields
+      if (opts.override) {
+        for (const kv of opts.override) {
+          const eqIdx = kv.indexOf("=");
+          if (eqIdx < 1) {
+            console.error(`⚠️  Invalid override (expected key=value): ${kv}`);
+            continue;
+          }
+          const key = kv.substring(0, eqIdx);
+          const value = kv.substring(eqIdx + 1);
+          if (key in plan.setup) {
+            // Handle empty string as "unset" for optional fields
+            if (value === "") {
+              (plan.setup as unknown as Record<string, unknown>)[key] = undefined;
+            } else {
+              // Resolve path-like fields relative to cwd
+              const pathFields = ["extensionPath", "workspace", "file"];
+              (plan.setup as unknown as Record<string, unknown>)[key] = pathFields.includes(key)
+                ? path.resolve(value)
+                : value;
+            }
+            console.log(`   ⚙️  Override: setup.${key} = ${value || "(unset)"}`);
+          } else {
+            console.error(`⚠️  Unknown setup field: ${key}`);
+          }
+        }
+      }
 
       // Append --vsix paths to plan's vsix list
       if (opts.vsix) {
