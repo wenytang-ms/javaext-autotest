@@ -1,0 +1,116 @@
+# Test Plan: Gradle "Delegate Test to Gradle" — PR #1810 Verification
+#
+# Verifies that "Delegate Test to Gradle" works for Gradle projects
+# regardless of import method (BSP or non-BSP).
+#
+# Related issues:
+#   - microsoft/vscode-java-test#1771: Delegate to Gradle does not work
+#   - microsoft/vscode-java-test#1726: Buildship-imported projects fail silently
+#   - microsoft/vscode-gradle#1802: IllegalArgumentException for non-BSP projects
+#
+# Uses the kradle test project (Gradle 8.5, Kotlin DSL, JUnit 5).
+# The vscode-gradle VSIX from the PR branch must be passed via --vsix.
+#
+# Prerequisites:
+#   - eclipse.jdt.ls repo cloned locally
+#   - JDK 21+ installed
+#   - VSIX built from PR branch: cd vscode-gradle/extension && npx @vscode/vsce package --no-dependencies
+#
+# Usage:
+#   cd javaext-autotest
+#   npx autotest run test-plans/java-gradle-delegate-test.yaml \
+#     --vsix ../vscode-gradle/extension/vscode-gradle-3.17.3.vsix
+
+name: "Gradle Delegate Test — PR #1810 Verification"
+description: |
+  Verifies the fix for "Delegate Test to Gradle" decoupled from BSP import.
+  After the fix, running tests via "Delegate Test to Gradle" profile should
+  produce actual test results instead of silently failing.
+
+setup:
+  extension: "redhat.java"
+  extensions:
+    - "vscjava.vscode-java-pack"
+  vsix:
+    - "../../vscode-java-test/vscode-java-test-0.44.0.vsix"
+  vscodeVersion: "stable"
+  workspace: "../../eclipse.jdt.ls/org.eclipse.jdt.ls.tests/projects/gradle/kradle"
+  timeout: 180
+
+steps:
+  # ── Phase 1: Wait for project import ────────────────────
+  - id: "ls-ready"
+    action: "waitForLanguageServer"
+    verify: "Java Language Server is ready and project imported without errors"
+    verifyProblems:
+      errors: 0
+    timeout: 300
+
+  # ── Phase 2: Open test explorer and test file, wait for discovery ──
+  - id: "open-test-explorer"
+    action: "openTestExplorer"
+    verify: "Test Explorer panel is opened"
+    timeout: 10
+
+  - id: "open-test-file"
+    action: "open file AppTest.java"
+    verify: "AppTest.java is opened in the editor"
+    timeout: 15
+
+  - id: "wait-test-discovery"
+    action: "wait 180 seconds"
+    verify: "Wait for full test discovery (Gradle projects need 2-3 min in fresh workspace)"
+
+  # ── Phase 3: Run all tests ──────────────────────────────
+  # The modified vscode-java-test has its default "Run Tests" profile removed,
+  # so the only Run profile is "Delegate Test to Gradle" from vscode-gradle PR #1810.
+  # "Run All Tests" will automatically use the Gradle delegation profile.
+  - id: "run-all-tests"
+    action: "runAllTests"
+    verify: "Tests started with Delegate Test to Gradle (only available Run profile)"
+
+  - id: "wait-test-execution"
+    action: "wait 120 seconds"
+    verify: "Wait for Gradle test execution to complete (includes compilation + test run)"
+
+  # ── Phase 4: Check Java Test Runner diagnostics ─────────
+  - id: "check-jtr-diag"
+    action: "run command Output: Show Output Channels..."
+    verify: "Show available output channels"
+    timeout: 10
+
+  - id: "wait-channels"
+    action: "wait 2 seconds"
+    verify: "Wait for channel list"
+
+  - id: "select-jtr-diag"
+    action: "select Java Test Runner (Diag) option"
+    verify: "Select Java Test Runner diagnostic channel to see profile routing logs"
+
+  - id: "wait-jtr-output"
+    action: "wait 3 seconds"
+    verify: "Wait for output to render"
+
+  # ── Phase 5: Check Gradle Test Runner diagnostics ───────
+  - id: "check-gradle-diag"
+    action: "run command Output: Show Output Channels..."
+    verify: "Show available output channels"
+    timeout: 10
+
+  - id: "wait-channels-2"
+    action: "wait 2 seconds"
+    verify: "Wait for channel list"
+
+  - id: "select-gradle-diag"
+    action: "select Gradle Test Runner (Diag) option"
+    verify: "Select Gradle Test Runner diagnostic channel to see launch() logs"
+
+  - id: "wait-gradle-output"
+    action: "wait 3 seconds"
+    verify: "Wait for output to render"
+
+  # ── Phase 6: Verify test results ────────────────────────
+  - id: "verify-test-explorer"
+    action: "openTestExplorer"
+    verify: "Test Explorer shows test results — appHasAGreeting test should show pass icon (green check)"
+    timeout: 10

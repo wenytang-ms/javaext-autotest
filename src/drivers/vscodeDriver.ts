@@ -292,6 +292,34 @@ export class VscodeDriver {
     await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
+  /**
+   * Open Command Palette, type label, then click the specific option by name
+   * instead of pressing Enter (which selects the first fuzzy match).
+   * Use this when the desired command isn't the top fuzzy-match result.
+   */
+  async selectAndRunCommand(label: string): Promise<void> {
+    const page = this.getPage();
+    await page.keyboard.press(COMMAND_PALETTE_KEY);
+
+    const palette = page.locator(QUICK_INPUT_SELECTOR);
+    await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await palette.fill(`>${label}`);
+    await page.waitForTimeout(500);
+
+    // Click the specific option by accessible name rather than pressing Enter
+    const option = page.getByRole("option", { name: label }).locator("a");
+    await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await option.click();
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+  }
+
+  /** Press a keyboard key (e.g. "Enter", "Escape", "Tab"). */
+  async pressKey(key: string): Promise<void> {
+    const page = this.getPage();
+    await page.keyboard.press(key);
+    await page.waitForTimeout(300);
+  }
+
   /** Open a file via Quick Open (Ctrl+P). Retries if the file indexer isn't ready. */
   async openFile(filePath: string): Promise<void> {
     const page = this.getPage();
@@ -894,10 +922,21 @@ export class VscodeDriver {
     // Wait for suggest widget to appear
     await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
 
-    const items = await page.locator(
-      ".monaco-list-row .label-name"
-    ).allTextContents().catch(() => [] as string[]);
+    return this.readCompletionItems();
+  }
 
+  /** Check if the suggest widget is currently visible */
+  async isCompletionVisible(): Promise<boolean> {
+    return this.getPage().locator(SUGGEST_WIDGET_SELECTOR).isVisible().catch(() => false);
+  }
+
+  /** Read completion items from the currently open suggest widget */
+  async readCompletionItems(): Promise<string[]> {
+    const page = this.getPage();
+    // Scope selector under the suggest widget to avoid picking up other Monaco lists
+    const items = await page.locator(SUGGEST_WIDGET_SELECTOR)
+      .locator(".monaco-list-row .label-name")
+      .allTextContents().catch(() => [] as string[]);
     return items;
   }
 
@@ -1171,6 +1210,96 @@ export class VscodeDriver {
     await this.runCommandFromPalette("Test: Run All Tests");
   }
 
+  /**
+   * Click the Run Tests dropdown in the Test Explorer and select a profile.
+   * In VS Code, when multiple run profiles exist, the Run button becomes a
+   * split button with a dropdown showing all available profiles.
+   */
+  async runTestsWithProfile(profileName: string): Promise<void> {
+    const page = this.getPage();
+    // Ensure Test Explorer is open
+    await this.openTestExplorer();
+    await page.waitForTimeout(1000);
+
+    // Strategy 1: Look for the split button dropdown in the Testing view header
+    // VS Code uses .monaco-dropdown-with-primary for split buttons
+    const splitDropdown = page.locator('.testing-explorer-header .monaco-dropdown-with-primary .dropdown-action-container');
+    if (await splitDropdown.isVisible().catch(() => false)) {
+      await splitDropdown.click();
+      await page.waitForTimeout(500);
+      const menuItem = page.getByText(profileName, { exact: false }).first();
+      await menuItem.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+      await menuItem.click();
+      return;
+    }
+
+    // Strategy 2: Find any dropdown button in the testing view header/toolbar
+    const dropdownBtn = page.locator('.pane-header.testing .monaco-dropdown-button, .testing-explorer-header .monaco-dropdown-button').first();
+    if (await dropdownBtn.isVisible().catch(() => false)) {
+      await dropdownBtn.click();
+      await page.waitForTimeout(500);
+      const menuItem = page.getByText(profileName, { exact: false }).first();
+      await menuItem.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+      await menuItem.click();
+      return;
+    }
+
+    // Strategy 3: Use the "..." more actions menu to find profile options
+    const moreActions = page.locator('.testing-explorer-header .codicon-toolbar-more, .pane-header.testing .codicon-toolbar-more').first();
+    if (await moreActions.isVisible().catch(() => false)) {
+      await moreActions.click();
+      await page.waitForTimeout(500);
+      const menuItem = page.getByText(profileName, { exact: false }).first();
+      if (await menuItem.isVisible().catch(() => false)) {
+        await menuItem.click();
+        return;
+      }
+      // Close the menu if profile not found
+      await page.keyboard.press("Escape");
+    }
+
+    // Strategy 4: Try right-clicking the test tree item for context menu
+    const treeItem = page.getByRole("treeitem", { name: /appHasAGreeting|AppTest|kradle/i }).first();
+    if (await treeItem.isVisible().catch(() => false)) {
+      await treeItem.click({ button: 'right' });
+      await page.waitForTimeout(500);
+      // Look for "Run Test" submenu or profile option
+      const profileOption = page.getByText(profileName, { exact: false }).first();
+      if (await profileOption.isVisible().catch(() => false)) {
+        await profileOption.click();
+        return;
+      }
+      // Try "Execute" or "Run" menu options
+      const runOption = page.locator('.context-view .action-label').filter({ hasText: /run/i }).first();
+      if (await runOption.isVisible().catch(() => false)) {
+        await runOption.hover();
+        await page.waitForTimeout(300);
+        const subOption = page.getByText(profileName, { exact: false }).first();
+        if (await subOption.isVisible().catch(() => false)) {
+          await subOption.click();
+          return;
+        }
+      }
+      await page.keyboard.press("Escape");
+    }
+
+    // Strategy 5: Try using the toolbar play button directly by aria-label
+    const runBtn = page.locator('[aria-label*="Run" i][aria-label*="Test" i]').first();
+    if (await runBtn.isVisible().catch(() => false)) {
+      // Right-click might show profile selection
+      await runBtn.click({ button: 'right' });
+      await page.waitForTimeout(500);
+      const profileOption = page.getByText(profileName, { exact: false }).first();
+      if (await profileOption.isVisible().catch(() => false)) {
+        await profileOption.click();
+        return;
+      }
+      await page.keyboard.press("Escape");
+    }
+
+    throw new Error(`Could not find Run Tests dropdown or profile "${profileName}" in Test Explorer`);
+  }
+
   /** Wait for test execution to complete by polling the test status bar */
   async waitForTestComplete(timeoutMs = 60_000): Promise<boolean> {
     const page = this.getPage();
@@ -1303,6 +1432,71 @@ export class VscodeDriver {
   /** Wait for a specified duration (seconds) */
   async wait(seconds: number): Promise<void> {
     await this.getPage().waitForTimeout(seconds * 1000);
+  }
+
+  /**
+   * Wait for test discovery to complete by polling the Test Explorer sidebar
+   * for a specific tree item. Only searches within the sidebar test explorer
+   * panel (not the editor area).
+   * Returns true if the item appeared within the timeout, false otherwise.
+   */
+  async waitForTestDiscovery(testItemName: string, timeoutMs = 300_000): Promise<boolean> {
+    const page = this.getPage();
+    const pollInterval = 5000;
+    const deadline = Date.now() + timeoutMs;
+
+    // Ensure test explorer is visible
+    await this.openTestExplorer();
+    await page.waitForTimeout(1000);
+
+    console.log(`   ⏳ Waiting for test item "${testItemName}" to appear in Test Explorer sidebar (timeout: ${timeoutMs / 1000}s)...`);
+
+    // The test explorer tree lives inside the sidebar (.composite.viewlet or .split-view-view)
+    // Specifically inside the Testing view container
+    const sidebarSelector = ".split-view-view .tree-explorer-viewlet-tree-view";
+
+    while (Date.now() < deadline) {
+      // Look for treeitem ONLY within the sidebar test explorer tree
+      const sidebar = page.locator(sidebarSelector).first();
+      const sidebarVisible = await sidebar.isVisible().catch(() => false);
+
+      if (sidebarVisible) {
+        // Search for the test item within the sidebar tree
+        const item = sidebar.getByRole("treeitem", { name: new RegExp(testItemName, "i") }).first();
+        const visible = await item.isVisible().catch(() => false);
+        if (visible) {
+          console.log(`   ✅ Test item "${testItemName}" found in Test Explorer sidebar!`);
+          return true;
+        }
+
+        // Try expanding project nodes to trigger lazy loading
+        const allTreeItems = sidebar.getByRole("treeitem");
+        const count = await allTreeItems.count().catch(() => 0);
+        for (let i = 0; i < count; i++) {
+          const ti = allTreeItems.nth(i);
+          const expanded = await ti.getAttribute("aria-expanded").catch(() => null);
+          if (expanded === "false") {
+            const label = await ti.textContent().catch(() => "");
+            console.log(`   ⏳ Expanding collapsed node: "${label?.substring(0, 40)}..."`);
+            await ti.locator("a").first().click().catch(() => {});
+            await page.waitForTimeout(2000);
+            break; // re-check after expanding
+          }
+        }
+      } else {
+        console.log(`   ⏳ Test Explorer sidebar not yet visible, re-opening...`);
+        await this.openTestExplorer();
+      }
+
+      const elapsed = Math.round((Date.now() - (deadline - timeoutMs)) / 1000);
+      if (elapsed % 30 === 0) {
+        console.log(`   ⏳ Still waiting... (${elapsed}s elapsed)`);
+      }
+      await page.waitForTimeout(pollInterval);
+    }
+
+    console.log(`   ❌ Test item "${testItemName}" did not appear within ${timeoutMs / 1000}s`);
+    return false;
   }
 
   // ═══════════════════════════════════════════════════════

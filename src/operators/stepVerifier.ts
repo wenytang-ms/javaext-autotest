@@ -154,57 +154,116 @@ export class StepVerifier {
     if (!step.verifyCompletion) return null;
 
     const maxWait = (step.timeout ?? 30) * 1000;
-    const pollInterval = 3000;
+    const pollInterval = 1000;
     const deadline = Date.now() + maxWait;
+    const vc = step.verifyCompletion;
+
+    // Trigger completion once — then poll the open widget
+    await this.driver.triggerCompletion();
+
+    let lastItems: string[] = [];
 
     while (Date.now() < deadline) {
-      const items = await this.driver.triggerCompletion();
-      await this.driver.dismissCompletion();
-
-      if (step.verifyCompletion.notEmpty && items.length === 0) {
-        // Empty list — LS may still be loading, retry
-        console.log(`   ⏳ Completion empty, retrying...`);
+      // If the widget closed itself, retrigger
+      const visible = await this.driver.isCompletionVisible();
+      if (!visible) {
+        await this.driver.triggerCompletion();
         await this.driver.wait(pollInterval / 1000);
         continue;
       }
 
-      if (step.verifyCompletion.contains) {
-        let allFound = true;
-        for (const expected of step.verifyCompletion.contains) {
+      const items = await this.driver.readCompletionItems();
+      lastItems = items;
+
+      // Check positive conditions first (notEmpty, contains)
+      if (vc.notEmpty && items.length === 0) {
+        await this.driver.wait(pollInterval / 1000);
+        continue;
+      }
+
+      let positivesMet = true;
+      if (vc.contains) {
+        for (const expected of vc.contains) {
           const found = items.some((item) =>
             item.toLowerCase().includes(expected.toLowerCase())
           );
           if (!found) {
-            allFound = false;
+            positivesMet = false;
             break;
           }
         }
-        if (!allFound) {
-          console.log(`   ⏳ Completion missing expected items, retrying...`);
-          await this.driver.wait(pollInterval / 1000);
-          continue;
+      }
+
+      if (!positivesMet) {
+        console.log(`   ⏳ Completion missing expected items, retrying...`);
+        await this.driver.wait(pollInterval / 1000);
+        continue;
+      }
+
+      // Positive conditions met — now check excludes.
+      // Wait a short grace period and re-read to let the list settle,
+      // since LS items may still be arriving.
+      await this.driver.wait(1);
+      const settledItems = await this.driver.readCompletionItems();
+      lastItems = settledItems.length > 0 ? settledItems : lastItems;
+
+      if (vc.excludes) {
+        for (const excluded of vc.excludes) {
+          const found = lastItems.some((item) =>
+            item.toLowerCase().includes(excluded.toLowerCase())
+          );
+          if (found) {
+            await this.driver.dismissCompletion();
+            return {
+              passed: false,
+              reason: `Completion list should NOT contain "${excluded}" but it does. Got: [${lastItems.slice(0, 15).join(", ")}${lastItems.length > 15 ? "..." : ""}]`,
+            };
+          }
         }
       }
 
+      // All conditions passed
+      await this.driver.dismissCompletion();
       return { passed: true };
     }
 
-    // Final attempt for error message
-    const items = await this.driver.triggerCompletion();
+    // Timeout — read final state for error message
+    const visible = await this.driver.isCompletionVisible();
+    if (!visible) {
+      // Try one last trigger
+      lastItems = await this.driver.triggerCompletion();
+      await this.driver.wait(2);
+      lastItems = await this.driver.readCompletionItems();
+    } else {
+      lastItems = await this.driver.readCompletionItems();
+    }
     await this.driver.dismissCompletion();
 
-    if (step.verifyCompletion.notEmpty && items.length === 0) {
+    if (vc.notEmpty && lastItems.length === 0) {
       return { passed: false, reason: "Expected non-empty completion list, got empty" };
     }
-    if (step.verifyCompletion.contains) {
-      for (const expected of step.verifyCompletion.contains) {
-        const found = items.some((item) =>
+    if (vc.contains) {
+      for (const expected of vc.contains) {
+        const found = lastItems.some((item) =>
           item.toLowerCase().includes(expected.toLowerCase())
         );
         if (!found) {
           return {
             passed: false,
-            reason: `Completion list missing "${expected}". Got: [${items.slice(0, 10).join(", ")}${items.length > 10 ? "..." : ""}]`,
+            reason: `Completion list missing "${expected}". Got: [${lastItems.slice(0, 10).join(", ")}${lastItems.length > 10 ? "..." : ""}]`,
+          };
+        }
+      }
+    }
+    if (vc.excludes) {
+      for (const excluded of vc.excludes) {
+        const found = lastItems.some((item) =>
+          item.toLowerCase().includes(excluded.toLowerCase())
+        );
+        if (found) {
+          return {
+            passed: false,
+            reason: `Completion list should NOT contain "${excluded}" but it does. Got: [${lastItems.slice(0, 15).join(", ")}${lastItems.length > 15 ? "..." : ""}]`,
           };
         }
       }

@@ -76,6 +76,8 @@ export interface CompletionVerification {
   notEmpty?: boolean;
   /** Completion list must include these items (partial match on label) */
   contains?: string[];
+  /** Completion list must NOT include these items (partial match on label) */
+  excludes?: string[];
 }
 
 // ─── Driver Types ──────────────────────────────────────────

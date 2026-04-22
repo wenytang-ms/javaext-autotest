@@ -56,8 +56,16 @@ export class ActionResolver {
     return [
       // ── Command Palette ──
       {
+        regex: /(?:selectCommand|选择命令)\s+(.+)/i,
+        handler: async (m) => { await d.selectAndRunCommand(m[1]); },
+      },
+      {
         regex: /(?:执行命令|run command)\s+(.+)/i,
         handler: async (m) => { await d.runCommandFromPalette(m[1]); },
+      },
+      {
+        regex: /(?:pressKey|按键)\s+(.+)/i,
+        handler: async (m) => { await d.pressKey(m[1].trim()); },
       },
 
       // ── UI Navigation ──
@@ -196,8 +204,20 @@ export class ActionResolver {
         handler: async () => { await d.openTestExplorer(); },
       },
       {
+        regex: /(?:waitForTestDiscovery|等待测试发现)\s+(.+?)(?:\s+(\d+)s)?$/i,
+        handler: async (m) => {
+          const timeoutMs = m[2] ? parseInt(m[2], 10) * 1000 : 300_000;
+          const found = await d.waitForTestDiscovery(m[1].trim(), timeoutMs);
+          if (!found) throw new Error(`Test item "${m[1].trim()}" not found within timeout`);
+        },
+      },
+      {
         regex: /(?:runAllTests|运行全部测试)/i,
         handler: async () => { await d.runAllTests(); },
+      },
+      {
+        regex: /(?:runTestsWithProfile|使用配置运行测试)\s+(.+)/i,
+        handler: async (m) => { await d.runTestsWithProfile(m[1].trim()); },
       },
       {
         regex: /(?:clickCodeLens|点击CodeLens)\s+(.+)/i,

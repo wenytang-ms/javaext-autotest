@@ -1,0 +1,82 @@
+# Test Plan: Annotation Completion Bug (eclipse.jdt.ls #3604)
+#
+# Bug: Completing on `@Deprecated(forRemoval = |)` shows methods (equals, hashCode, etc.)
+#      when only boolean constants (true, false) should be proposed.
+#
+# Source: https://github.com/eclipse-jdtls/eclipse.jdt.ls/issues/3604
+#
+# Strategy:
+#   1. Open salut-java11 Maven project (Java 11 required for @Deprecated.forRemoval)
+#   2. Insert `@Deprecated(forRemoval = ` annotation before a method in Bar.java
+#   3. Position cursor at the annotation attribute value
+#   4. Trigger completion and verify:
+#      - Should contain: true, false
+#      - Should NOT contain: methods like equals, hashCode, toString, wait, notify
+#
+# Usage: npx autotest run test-plans/java-annotation-completion-bug.yaml
+
+name: "Annotation Completion Bug — eclipse.jdt.ls #3604"
+description: |
+  Verifies that code completion at annotation attribute value position
+  only proposes valid constant expressions. For boolean attributes like
+  @Deprecated(forRemoval = ...), only true/false should be suggested,
+  not arbitrary methods from the enclosing scope.
+
+setup:
+  extension: "redhat.java"
+  extensionPath: "../../vscode-java"
+  extensions:
+    - "vscjava.vscode-java-pack"
+  vscodeVersion: "stable"
+  workspace: "../../vscode-java/test/resources/projects/maven/salut-java11"
+  timeout: 90
+
+steps:
+  # ── Step 1: Wait for language server ready ──────────────────────
+  - id: "ls-ready"
+    action: "waitForLanguageServer"
+    verify: "Status bar shows Java language server is ready"
+    verifyProblems:
+      errors: 0
+    timeout: 120
+
+  # ── Step 2: Open Bar.java ──────────────────────────────────────
+  - id: "open-bar"
+    action: "open file Bar.java"
+    verify: "Bar.java file is open in the editor"
+    timeout: 10
+
+  # ── Step 3: Insert @Deprecated annotation before the main method ──
+  # Bar.java line 8 is: "public static void main(String[] args) {"
+  # Insert annotation on line 8, pushing main() to line 9
+  - id: "insert-annotation"
+    action: "insertLineInFile src/main/java/org/sample/Bar.java 8 \t@Deprecated(forRemoval = "
+    verify: "Annotation line inserted before main method"
+    waitBefore: 3
+
+  # ── Step 4: Position cursor at end of the annotation attribute value ──
+  # After insert, line 8 is: "\t@Deprecated(forRemoval = "
+  # We need cursor right after "= " to trigger completion
+  - id: "goto-annotation-line"
+    action: "goToLine 8"
+    waitBefore: 2
+
+  - id: "goto-end"
+    action: "goToEndOfLine"
+
+  # ── Step 5: Trigger completion and verify ──────────────────────
+  # BUG: completion shows methods (equals, hashCode, etc.) instead of only true/false
+  # FIX: annotation-context filter in CompletionProposalRequestor removes invalid proposals
+  - id: "verify-annotation-completion"
+    action: "triggerCompletionAt endOfLine"
+    verify: "Completion should only show valid annotation values, not methods"
+    verifyCompletion:
+      notEmpty: true
+      contains:
+        - "true"
+        - "false"
+      excludes:
+        - "equals"
+        - "hashCode"
+        - "toString"
+    timeout: 30

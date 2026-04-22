@@ -1,0 +1,57 @@
+# Test Plan: Annotation Completion Bug — BEFORE FIX (marketplace extension)
+#
+# This uses the marketplace redhat.java extension (no fix applied).
+# Expected result: FAIL — completion should show methods like equals/hashCode
+# instead of true/false.
+
+name: "Annotation Completion Bug — BEFORE FIX (marketplace)"
+description: |
+  Runs against the unpatched marketplace extension to confirm the bug exists.
+  Completion at @Deprecated(forRemoval = |) should show invalid items.
+
+setup:
+  extension: "redhat.java"
+  extensions:
+    - "vscjava.vscode-java-pack"
+  vscodeVersion: "stable"
+  workspace: "../../vscode-java/test/resources/projects/maven/salut-java11"
+  timeout: 90
+
+steps:
+  - id: "ls-ready"
+    action: "waitForLanguageServer"
+    verify: "Language server ready"
+    verifyProblems:
+      errors: 0
+    timeout: 120
+
+  - id: "open-bar"
+    action: "open file Bar.java"
+    verify: "Bar.java open"
+    timeout: 10
+
+  - id: "insert-annotation"
+    action: "insertLineInFile src/main/java/org/sample/Bar.java 8 \t@Deprecated(forRemoval = "
+    verify: "Annotation inserted"
+    waitBefore: 3
+
+  - id: "goto-annotation-line"
+    action: "goToLine 8"
+    waitBefore: 2
+
+  - id: "goto-end"
+    action: "goToEndOfLine"
+
+  - id: "verify-annotation-completion"
+    action: "triggerCompletionAt endOfLine"
+    verify: "Completion should contain true/false but will show methods (bug)"
+    verifyCompletion:
+      notEmpty: true
+      contains:
+        - "true"
+        - "false"
+      excludes:
+        - "equals"
+        - "hashCode"
+        - "toString"
+    timeout: 30
