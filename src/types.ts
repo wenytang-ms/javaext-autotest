@@ -47,6 +47,7 @@ export interface TestStep {
   verifyEditor?: EditorVerification;
   verifyProblems?: ProblemsVerification;
   verifyCompletion?: CompletionVerification;
+  verifyQuickInput?: QuickInputVerification;
   timeout?: number;
   waitBefore?: number;
 }
@@ -78,6 +79,15 @@ export interface CompletionVerification {
   contains?: string[];
   /** Completion list must NOT include these items (partial match on label) */
   excludes?: string[];
+}
+
+export interface QuickInputVerification {
+  /** If true, verify no validation error is shown */
+  noError?: boolean;
+  /** Verify the validation message contains this text */
+  messageContains?: string;
+  /** Verify the validation message does NOT contain this text */
+  messageExcludes?: string;
 }
 
 // ─── Driver Types ──────────────────────────────────────────

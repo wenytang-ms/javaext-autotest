@@ -1,0 +1,91 @@
+# Test Plan: Unicode Java Class Name (vscode-java-dependency #789)
+#
+# Bug: "New > Java Class" wizard rejects non-ASCII identifiers (e.g., Japanese "ほげ")
+#      with "Invalid Java qualified name." error, even though Java spec allows Unicode identifiers.
+#
+# Source: https://github.com/microsoft/vscode-java-dependency/issues/789
+#
+# Strategy:
+#   1. Open a Maven project (salut), open Bar.java as the active editor
+#   2. Run "Java: New Java File" BEFORE LS fully starts — this triggers the
+#      getPackageFsPathFromActiveEditor() fallback which just checks the active
+#      file is .java and returns its directory (no LS source-root query needed).
+#   3. Select "class" from the type quickpick
+#   4. In the class name input box, type Japanese name and check validation
+#
+# NOTE: We deliberately do NOT wait for LS to be fully "Ready" before running
+# the command.  When LS status != "Started", inferPackageFsPath() uses a simpler
+# fallback that always succeeds with a .java file active.  Waiting for "Ready"
+# causes the function to call getSourceRoots() which may return empty in the
+# autotest temp-worktree environment.
+#
+# Before (bug): validation error "Invalid Java qualified name."
+# After (fix): no error, input accepted
+#
+# Usage:
+#   Before: npx autotest run test-plans/java-unicode-classname-789.yaml --override vsix=
+#   After:  npx autotest run test-plans/java-unicode-classname-789.yaml
+
+name: "Unicode Class Name — vscode-java-dependency #789"
+description: |
+  Verifies that the "New > Java Class" wizard accepts Unicode identifiers
+  (e.g., Japanese characters) as valid Java class names, per JLS §3.8.
+
+setup:
+  extension: "redhat.java"
+  extensions:
+    - "vscjava.vscode-java-pack"
+  vsix:
+    - "../../vscode-java-dependency/vscode-java-dependency-fix789.vsix"
+  vscodeVersion: "stable"
+  workspace: "../../vscode-java/test/resources/projects/maven/salut"
+  timeout: 90
+
+steps:
+  # ── Step 1: Open Bar.java to provide package context ────────────
+  # Wait ~8s for extensions to activate (triggered by pom.xml in workspace)
+  # but NOT for LS to reach "Ready" status.
+  - id: "open-java-file"
+    action: "open file Bar.java"
+    verify: "Bar.java opened in editor"
+    waitBefore: 8
+    timeout: 15
+
+  # ── Step 2: Run "Java: New Java File" command ──────────────────
+  # The extension checks isLanguageServerReady(): since LS is still
+  # importing, it falls back to getPackageFsPathFromActiveEditor()
+  # which returns Bar.java's directory → non-empty → proceeds to quickpick.
+  - id: "new-file-command"
+    action: "run command New Java File"
+    verify: "Type quickpick opened — shows class/interface/enum options"
+    waitBefore: 2
+    timeout: 15
+
+  # ── Step 3: Select "class" (first option, already highlighted) ─
+  - id: "select-class-type"
+    action: "pressKey Enter"
+    verify: "Class type selected, input box for class name should appear"
+    timeout: 5
+
+  # ── Step 4: Type Japanese class name and check validation ──────
+  - id: "type-japanese-name"
+    action: "typeInQuickInput ほげ"
+    verify: "Japanese class name typed — before fix: 'Invalid Java qualified name.'; after fix: no error"
+    waitBefore: 1
+    timeout: 10
+    verifyQuickInput:
+      noError: true
+
+  # ── Step 5: Switch to ASCII name and verify it too ─────────────
+  - id: "type-ascii-name"
+    action: "typeInQuickInput MyTestClass"
+    verify: "ASCII class name also accepted"
+    timeout: 10
+    verifyQuickInput:
+      noError: true
+
+  # ── Step 6: Dismiss the input box ──────────────────────────────
+  - id: "dismiss-input"
+    action: "dismissQuickInput"
+    verify: "Input box dismissed"
+    timeout: 5

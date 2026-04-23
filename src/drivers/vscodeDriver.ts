@@ -489,6 +489,39 @@ export class VscodeDriver {
     await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
+  /** Type text into the currently visible quick input box (without pressing Enter) */
+  async typeInQuickInput(text: string): Promise<void> {
+    const page = this.getPage();
+    const input = page.locator(QUICK_INPUT_SELECTOR);
+    await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await input.fill(text);
+    await page.waitForTimeout(500); // wait for validation to run
+  }
+
+  /** Read the validation message from the quick input widget */
+  async getQuickInputValidationMessage(): Promise<string> {
+    const page = this.getPage();
+    // VSCode shows validation in .quick-input-message with severity class
+    const msg = page.locator(".quick-input-widget .quick-input-message");
+    const visible = await msg.isVisible().catch(() => false);
+    if (!visible) return "";
+    return await msg.textContent() ?? "";
+  }
+
+  /** Press Enter in the quick input to confirm, then wait for it to close */
+  async confirmQuickInput(): Promise<void> {
+    const page = this.getPage();
+    await page.keyboard.press(ENTER_KEY);
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+  }
+
+  /** Dismiss/close the quick input widget with Escape */
+  async dismissQuickInput(): Promise<void> {
+    const page = this.getPage();
+    await page.keyboard.press("Escape");
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+  }
+
   /** Get all current notification messages */
   async getNotifications(): Promise<string[]> {
     const page = this.getPage();

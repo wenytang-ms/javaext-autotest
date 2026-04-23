@@ -249,6 +249,20 @@ export class ActionResolver {
         regex: /(?:openDependencyExplorer|打开依赖视图)/i,
         handler: async () => { await d.openDependencyExplorer(); },
       },
+
+      // ── Quick Input ──
+      {
+        regex: /(?:typeInQuickInput|在输入框中输入)\s+([\s\S]+)/i,
+        handler: async (m) => { await d.typeInQuickInput(m[1].trim()); },
+      },
+      {
+        regex: /(?:confirmQuickInput|确认输入)/i,
+        handler: async () => { await d.confirmQuickInput(); },
+      },
+      {
+        regex: /(?:dismissQuickInput|取消输入)/i,
+        handler: async () => { await d.dismissQuickInput(); },
+      },
     ];
   }
 }

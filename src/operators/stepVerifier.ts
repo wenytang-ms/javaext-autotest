@@ -27,7 +27,8 @@ export class StepVerifier {
   ): Promise<{ passed: boolean; reason?: string }> {
     // If no deterministic verification defined, auto-pass
     if (!step.verifyFile && !step.verifyNotification
-        && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion) {
+        && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
+        && !step.verifyQuickInput) {
       return { passed: true };
     }
 
@@ -47,6 +48,9 @@ export class StepVerifier {
 
     const completionResult = await this.verifyCompletion(step);
     if (completionResult && !completionResult.passed) return completionResult;
+
+    const quickInputResult = await this.verifyQuickInput(step);
+    if (quickInputResult && !quickInputResult.passed) return quickInputResult;
 
     return { passed: true };
   }
@@ -268,6 +272,34 @@ export class StepVerifier {
         }
       }
     }
+    return { passed: true };
+  }
+
+  private async verifyQuickInput(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+    if (!step.verifyQuickInput) return null;
+    const qi = step.verifyQuickInput;
+
+    const message = await this.driver.getQuickInputValidationMessage();
+    console.log(`   🔍 Quick input validation message: "${message}"`);
+
+    if (qi.noError) {
+      if (message && message.trim().length > 0) {
+        return { passed: false, reason: `Expected no validation error, but got: "${message}"` };
+      }
+    }
+
+    if (qi.messageContains) {
+      if (!message.toLowerCase().includes(qi.messageContains.toLowerCase())) {
+        return { passed: false, reason: `Validation message should contain "${qi.messageContains}" but got: "${message}"` };
+      }
+    }
+
+    if (qi.messageExcludes) {
+      if (message.toLowerCase().includes(qi.messageExcludes.toLowerCase())) {
+        return { passed: false, reason: `Validation message should NOT contain "${qi.messageExcludes}" but got: "${message}"` };
+      }
+    }
+
     return { passed: true };
   }
 
