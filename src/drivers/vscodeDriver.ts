@@ -102,6 +102,7 @@ export class VscodeDriver {
       console.log(`📦 Extensions installed\n`);
     }
 
+    const trustMode = this.options.workspaceTrust ?? "disabled";
     const args = [
       "--no-sandbox",
       "--disable-gpu-sandbox",
@@ -109,7 +110,7 @@ export class VscodeDriver {
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",
-      "--disable-workspace-trust",
+      ...(trustMode === "disabled" ? ["--disable-workspace-trust"] : []),
       "--password-store=basic",
       "--enable-smoke-test-driver",
       ...baseArgs,
@@ -198,6 +199,58 @@ export class VscodeDriver {
     this.page = await this.app.firstWindow();
     // Wait for VSCode workbench to render
     await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: 30_000 });
+
+    // Handle workspace trust prompt if trust mode is not disabled
+    if (trustMode !== "disabled") {
+      await this.handleWorkspaceTrustPrompt(trustMode);
+    }
+  }
+
+  /**
+   * Handle the workspace trust startup dialog.
+   * VSCode shows a modal dialog asking "Do you trust the authors of the files in this folder?"
+   */
+  private async handleWorkspaceTrustPrompt(mode: "trusted" | "untrusted"): Promise<void> {
+    const page = this.getPage();
+    const DIALOG_SELECTOR = ".monaco-dialog-box";
+
+    try {
+      // Wait for the trust dialog to appear (up to 10s)
+      await page.locator(DIALOG_SELECTOR).waitFor({ state: "visible", timeout: 10_000 });
+
+      if (mode === "trusted") {
+        // Click the "I Trust the Authors" / "Yes, I trust" button
+        const trustButton = page.locator(DIALOG_SELECTOR)
+          .getByRole("button", { name: /trust/i });
+        if (await trustButton.count() > 0) {
+          await trustButton.first().click();
+        } else {
+          // Fallback: click first non-cancel button
+          await page.locator(DIALOG_SELECTOR).locator(".dialog-buttons button").first().click();
+        }
+      } else {
+        // "untrusted" — click the "Don't Trust" / "No, I don't trust" button
+        const dontTrustButton = page.locator(DIALOG_SELECTOR)
+          .getByRole("button", { name: /don.*trust|no/i });
+        if (await dontTrustButton.count() > 0) {
+          await dontTrustButton.first().click();
+        } else {
+          // Fallback: click last button (typically the "reject" option)
+          const buttons = page.locator(DIALOG_SELECTOR).locator(".dialog-buttons button");
+          const count = await buttons.count();
+          if (count > 1) {
+            await buttons.nth(count - 1).click();
+          } else if (count > 0) {
+            await buttons.first().click();
+          }
+        }
+      }
+
+      console.log(`🔒 Workspace trust: ${mode}`);
+    } catch {
+      // Dialog may not appear (e.g., trust already resolved) — that's OK
+      console.log(`🔒 No workspace trust prompt appeared (mode: ${mode})`);
+    }
   }
 
   /** Close all visible notification toasts (rarely needed with --enable-smoke-test-driver) */
@@ -1104,7 +1157,7 @@ export class VscodeDriver {
 
     // Race: debug toolbar (success) vs error dialog (build errors) vs timeout
     const toolbar = page.locator(".debug-toolbar");
-    const errorDialog = page.locator(".dialog-box");
+    const errorDialog = page.locator(".monaco-dialog-box");
 
     // Poll in a loop: check toolbar, dialog, and problems count
     const deadline = Date.now() + 30_000;
@@ -1593,5 +1646,54 @@ export class VscodeDriver {
     const relPath = path.relative(gitRoot, workspacePath);
     const worktreeWorkspace = path.join(worktreeDir, relPath);
     return worktreeWorkspace;
+  }
+
+  // ═══════════════════════════════════════════════════════
+  //  Dialog interactions (modal dialogs via .monaco-dialog-box)
+  // ═══════════════════════════════════════════════════════
+
+  /** Check if a modal dialog is currently visible */
+  async isDialogVisible(): Promise<boolean> {
+    const page = this.getPage();
+    return await page.locator(".monaco-dialog-box").isVisible().catch(() => false);
+  }
+
+  /** Get the message text of the currently visible modal dialog */
+  async getDialogMessage(): Promise<string> {
+    const page = this.getPage();
+    return await page.locator(".monaco-dialog-box .dialog-message-text").textContent().catch(() => "") ?? "";
+  }
+
+  /** Click a button in the currently visible modal dialog by label (partial match) */
+  async clickDialogButton(label: string): Promise<void> {
+    const page = this.getPage();
+    const dialog = page.locator(".monaco-dialog-box");
+    await dialog.waitFor({ state: "visible", timeout: 10_000 });
+
+    // Try role-based matching first
+    const roleButton = dialog.getByRole("button", { name: new RegExp(label, "i") });
+    if (await roleButton.count() > 0) {
+      await roleButton.first().click();
+      return;
+    }
+
+    // Fallback: text-content matching on all buttons
+    const buttons = dialog.locator(".dialog-buttons button");
+    const count = await buttons.count();
+    for (let i = 0; i < count; i++) {
+      const text = await buttons.nth(i).textContent() ?? "";
+      if (text.toLowerCase().includes(label.toLowerCase())) {
+        await buttons.nth(i).click();
+        return;
+      }
+    }
+
+    throw new Error(`Dialog button "${label}" not found`);
+  }
+
+  /** Wait for a modal dialog to appear, with optional timeout */
+  async waitForDialog(timeoutMs: number = 10_000): Promise<void> {
+    const page = this.getPage();
+    await page.locator(".monaco-dialog-box").waitFor({ state: "visible", timeout: timeoutMs });
   }
 }

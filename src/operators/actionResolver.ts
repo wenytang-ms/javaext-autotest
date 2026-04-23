@@ -263,6 +263,19 @@ export class ActionResolver {
         regex: /(?:dismissQuickInput|取消输入)/i,
         handler: async () => { await d.dismissQuickInput(); },
       },
+
+      // ── Dialog ──
+      {
+        regex: /(?:clickDialogButton|点击对话框按钮)\s+(.+)/i,
+        handler: async (m) => { await d.clickDialogButton(m[1].trim()); },
+      },
+      {
+        regex: /(?:waitForDialog|等待对话框)\s*(?:(\d+)\s*(?:秒|seconds?|s))?/i,
+        handler: async (m) => {
+          const timeoutMs = m[1] ? parseInt(m[1], 10) * 1000 : 10_000;
+          await d.waitForDialog(timeoutMs);
+        },
+      },
     ];
   }
 }

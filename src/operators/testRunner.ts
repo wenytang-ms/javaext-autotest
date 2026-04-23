@@ -44,6 +44,7 @@ export class TestRunner {
       workspacePath: plan.setup.workspace,
       filePath: plan.setup.file,
       settings: plan.setup.settings,
+      workspaceTrust: plan.setup.workspaceTrust,
     });
 
     this.actionResolver = new ActionResolver(this.driver, {

@@ -51,6 +51,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       verifyEditor: step.verifyEditor as TestStep["verifyEditor"],
       verifyProblems: step.verifyProblems as TestStep["verifyProblems"],
       verifyCompletion: step.verifyCompletion as TestStep["verifyCompletion"],
+      verifyDialog: step.verifyDialog as TestStep["verifyDialog"],
       timeout: step.timeout as number | undefined,
       waitBefore: step.waitBefore as number | undefined,
     };
@@ -78,6 +79,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       repos: parseRepos(setup.repos, planDir),
       settings: setup.settings as Record<string, unknown> | undefined,
       timeout: setup.timeout as number | undefined,
+      workspaceTrust: parseWorkspaceTrust(setup.workspaceTrust),
     },
     steps,
   };
@@ -102,4 +104,14 @@ function parseRepos(raw: unknown, planDir: string): RepoClone[] | undefined {
     path: r.path ? path.resolve(planDir, r.path as string) : undefined,
     branch: r.branch as string | undefined,
   }));
+}
+
+function parseWorkspaceTrust(raw: unknown): "trusted" | "untrusted" | "disabled" | undefined {
+  if (!raw) return undefined;
+  const value = String(raw).toLowerCase();
+  const valid = ["trusted", "untrusted", "disabled"];
+  if (!valid.includes(value)) {
+    throw new Error(`Invalid workspaceTrust value: "${raw}". Must be one of: ${valid.join(", ")}`);
+  }
+  return value as "trusted" | "untrusted" | "disabled";
 }

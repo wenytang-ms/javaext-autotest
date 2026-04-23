@@ -27,6 +27,13 @@ export interface TestSetup {
   repos?: RepoClone[];
   settings?: Record<string, unknown>;
   timeout?: number;
+  /**
+   * Workspace trust mode:
+   * - "disabled" (default): passes --disable-workspace-trust, workspace.isTrusted is always true
+   * - "trusted": shows trust prompt on launch, automatically clicks "I Trust" to grant trust
+   * - "untrusted": shows trust prompt on launch, automatically clicks "Don't Trust" to stay restricted
+   */
+  workspaceTrust?: "trusted" | "untrusted" | "disabled";
 }
 
 export interface RepoClone {
@@ -48,8 +55,16 @@ export interface TestStep {
   verifyProblems?: ProblemsVerification;
   verifyCompletion?: CompletionVerification;
   verifyQuickInput?: QuickInputVerification;
+  verifyDialog?: DialogVerification;
   timeout?: number;
   waitBefore?: number;
+}
+
+export interface DialogVerification {
+  /** Dialog message should contain this text */
+  contains?: string;
+  /** Dialog should be visible (true) or not visible (false). Defaults to true. */
+  visible?: boolean;
 }
 
 export interface FileVerification {
@@ -127,6 +142,8 @@ export interface VscodeDriverOptions {
   launchArgs?: string[];
   /** Connect to an existing VSCode instance via CDP port instead of launching */
   attachPort?: number;
+  /** Workspace trust mode. See TestSetup.workspaceTrust for details. */
+  workspaceTrust?: "trusted" | "untrusted" | "disabled";
 }
 
 // ─── Execution Result Types ────────────────────────────────

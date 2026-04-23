@@ -1,0 +1,60 @@
+# Test Plan: Maven Workspace Trust Security (PR #1152)
+#
+# Verifies that vscode-maven properly handles workspace trust:
+# 1. In untrusted workspace, Maven explorer shows no projects
+# 2. Maven commands requiring trust prompt the user to manage trust
+# 3. POM file auto-update is blocked in untrusted workspace
+#
+# This test requires the workspace trust feature in the autotest framework.
+#
+# Usage: npx autotest run test-plans/maven-workspace-trust.yaml
+
+name: "Maven Workspace Trust — Untrusted Workspace Behavior"
+description: |
+  Validates PR #1152 security hardening:
+  - restrictedConfigurations blocks workspace-scoped Maven settings
+  - Maven explorer is empty in untrusted workspaces
+  - Maven commands require trust before execution
+  - Auto-update effective POM is blocked without trust
+
+setup:
+  extension: "vscjava.vscode-maven"
+  extensions:
+    - "vscjava.vscode-java-pack"
+  extensionPath: "../../vscode-maven"
+  vscodeVersion: "stable"
+  workspace: "../../vscode-java/test/resources/projects/maven/salut"
+  workspaceTrust: "untrusted"
+  timeout: 60
+
+steps:
+  # ── Step 1: Wait for VSCode to settle after untrusted launch ──
+  - id: "wait-settle"
+    action: "wait 5 seconds"
+    verify: "VSCode has fully loaded in restricted (untrusted) mode"
+
+  # ── Step 2: Check Maven Explorer is empty ──
+  # In untrusted workspace, MavenExplorerProvider.getChildren() returns undefined
+  - id: "open-explorer"
+    action: "click side tab Explorer tab"
+    verify: "Explorer sidebar is visible, Maven section should show no project tree"
+    timeout: 10
+
+  # ── Step 3: Try running a Maven lifecycle command ──
+  # registerCommandRequiringTrust should block this and show trust management prompt
+  - id: "try-maven-clean"
+    action: "run command Maven: clean"
+    waitBefore: 2
+    verify: "Command should be blocked — trust management dialog or notification appears"
+    timeout: 15
+
+  # ── Step 4: Verify workspace is in restricted mode ──
+  - id: "check-trust-status"
+    action: "run command Workbench: Manage Workspace Trust"
+    verify: "Workspace Trust editor opens showing the workspace is not trusted"
+    timeout: 10
+
+  # ── Step 5: Take a final screenshot showing the restricted state ──
+  - id: "final-state"
+    action: "wait 2 seconds"
+    verify: "Final state confirms Maven extension respects workspace trust restrictions"

@@ -28,7 +28,7 @@ export class StepVerifier {
     // If no deterministic verification defined, auto-pass
     if (!step.verifyFile && !step.verifyNotification
         && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
-        && !step.verifyQuickInput) {
+        && !step.verifyQuickInput && !step.verifyDialog) {
       return { passed: true };
     }
 
@@ -51,6 +51,9 @@ export class StepVerifier {
 
     const quickInputResult = await this.verifyQuickInput(step);
     if (quickInputResult && !quickInputResult.passed) return quickInputResult;
+
+    const dialogResult = await this.verifyDialogCheck(step);
+    if (dialogResult && !dialogResult.passed) return dialogResult;
 
     return { passed: true };
   }
@@ -297,6 +300,32 @@ export class StepVerifier {
     if (qi.messageExcludes) {
       if (message.toLowerCase().includes(qi.messageExcludes.toLowerCase())) {
         return { passed: false, reason: `Validation message should NOT contain "${qi.messageExcludes}" but got: "${message}"` };
+      }
+    }
+
+    return { passed: true };
+  }
+
+  private async verifyDialogCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+    if (!step.verifyDialog) return null;
+
+    const expectVisible = step.verifyDialog.visible !== false; // default true
+    const isVisible = await this.driver.isDialogVisible();
+
+    if (expectVisible && !isVisible) {
+      return { passed: false, reason: "Expected a modal dialog to be visible, but none found" };
+    }
+    if (!expectVisible && isVisible) {
+      return { passed: false, reason: "Expected no modal dialog, but one is visible" };
+    }
+
+    if (expectVisible && step.verifyDialog.contains) {
+      const message = await this.driver.getDialogMessage();
+      if (!message.toLowerCase().includes(step.verifyDialog.contains.toLowerCase())) {
+        return {
+          passed: false,
+          reason: `Dialog message should contain "${step.verifyDialog.contains}" but got: "${message}"`,
+        };
       }
     }
 
