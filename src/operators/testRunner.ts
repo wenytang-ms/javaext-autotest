@@ -49,6 +49,7 @@ export class TestRunner {
       filePath: plan.setup.file,
       settings: plan.setup.settings,
       workspaceTrust: plan.setup.workspaceTrust,
+      mockOpenDialog: plan.setup.mockOpenDialog,
     });
 
     this.actionResolver = new ActionResolver(this.driver, {

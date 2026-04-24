@@ -226,6 +226,37 @@ export class VscodeDriver {
       console.warn("⚠️  Could not patch Electron dialogs — native dialogs may need manual handling");
     }
 
+    // Mock showOpenDialog if configured — intercept native file picker
+    // and return pre-configured file paths instead of showing OS dialog
+    if (this.options.mockOpenDialog?.length) {
+      // Resolve ~/ paths to actual workspace directory
+      const wsPath = this.getWorkspacePath();
+      const mockResponses = this.options.mockOpenDialog.map(entry =>
+        entry.map(p => {
+          if (p.startsWith("~/") && wsPath) {
+            return path.join(wsPath, p.substring(2));
+          }
+          return p;
+        })
+      );
+      try {
+        await this.app.evaluate(({ dialog }, responses) => {
+          let callIndex = 0;
+          dialog.showOpenDialog = async () => {
+            const paths = responses[callIndex] || [];
+            callIndex = Math.min(callIndex + 1, responses.length - 1);
+            if (paths.length === 0) {
+              return { canceled: true, filePaths: [] };
+            }
+            return { canceled: false, filePaths: paths };
+          };
+        }, mockResponses);
+        console.log(`🔧 Mocked showOpenDialog with ${mockResponses.length} response(s)`);
+      } catch {
+        console.warn("⚠️  Could not mock showOpenDialog");
+      }
+    }
+
     // Handle workspace trust prompt if trust mode is not disabled
     if (trustMode !== "disabled") {
       await this.handleWorkspaceTrustPrompt(trustMode);

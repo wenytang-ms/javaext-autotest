@@ -82,6 +82,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       settings: setup.settings as Record<string, unknown> | undefined,
       timeout: setup.timeout as number | undefined,
       workspaceTrust: parseWorkspaceTrust(setup.workspaceTrust),
+      mockOpenDialog: parseMockOpenDialog(setup.mockOpenDialog, planDir),
     },
     steps,
   };
@@ -116,4 +117,23 @@ function parseWorkspaceTrust(raw: unknown): "trusted" | "untrusted" | "disabled"
     throw new Error(`Invalid workspaceTrust value: "${raw}". Must be one of: ${valid.join(", ")}`);
   }
   return value as "trusted" | "untrusted" | "disabled";
+}
+
+/**
+ * Parse mockOpenDialog entries. Each entry is a list of paths.
+ * Paths starting with ~/ are left as-is (resolved at runtime relative to workspace).
+ * Other relative paths are resolved relative to the plan directory.
+ */
+function parseMockOpenDialog(raw: unknown, planDir: string): string[][] | undefined {
+  if (!raw || !Array.isArray(raw)) return undefined;
+  return raw.map((entry: unknown) => {
+    if (Array.isArray(entry)) {
+      return entry.map((p: string) =>
+        p.startsWith("~/") ? p : path.resolve(planDir, p)
+      );
+    }
+    // Single string → wrap in array
+    const p = String(entry);
+    return [p.startsWith("~/") ? p : path.resolve(planDir, p)];
+  });
 }

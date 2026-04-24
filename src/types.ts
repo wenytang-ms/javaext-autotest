@@ -34,6 +34,13 @@ export interface TestSetup {
    * - "untrusted": shows trust prompt on launch, automatically clicks "Don't Trust" to stay restricted
    */
   workspaceTrust?: "trusted" | "untrusted" | "disabled";
+  /**
+   * Mock native file/folder dialogs (showOpenDialog/showSaveDialog).
+   * Each entry is a list of file paths to return when the dialog is triggered.
+   * Paths are resolved relative to the workspace root (use ~/ prefix).
+   * Dialogs are consumed in order — first call returns first entry, etc.
+   */
+  mockOpenDialog?: string[][];
 }
 
 export interface RepoClone {
@@ -160,6 +167,8 @@ export interface VscodeDriverOptions {
   attachPort?: number;
   /** Workspace trust mode. See TestSetup.workspaceTrust for details. */
   workspaceTrust?: "trusted" | "untrusted" | "disabled";
+  /** Mock showOpenDialog responses — each entry is consumed in order */
+  mockOpenDialog?: string[][];
 }
 
 // ─── Execution Result Types ────────────────────────────────
