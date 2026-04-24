@@ -29,7 +29,8 @@ export class StepVerifier {
     if (!step.verifyFile && !step.verifyNotification
         && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
         && !step.verifyQuickInput && !step.verifyDialog
-        && !step.verifyTreeItem && !step.verifyEditorTab) {
+        && !step.verifyTreeItem && !step.verifyEditorTab
+        && !step.verifyOutputChannel) {
       return { passed: true };
     }
 
@@ -61,6 +62,9 @@ export class StepVerifier {
 
     const editorTabResult = await this.verifyEditorTabCheck(step);
     if (editorTabResult && !editorTabResult.passed) return editorTabResult;
+
+    const outputChannelResult = await this.verifyOutputChannelCheck(step);
+    if (outputChannelResult && !outputChannelResult.passed) return outputChannelResult;
 
     return { passed: true };
   }
@@ -367,6 +371,21 @@ export class StepVerifier {
     const found = await this.driver.waitForEditorTab(step.verifyEditorTab.title, timeoutMs);
     if (!found) {
       return { passed: false, reason: `Editor tab "${step.verifyEditorTab.title}" did not appear within ${timeoutMs / 1000}s` };
+    }
+    return { passed: true };
+  }
+
+  private async verifyOutputChannelCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+    if (!step.verifyOutputChannel) return null;
+
+    const { channel, contains, notContains } = step.verifyOutputChannel;
+    const text = await this.driver.getOutputChannelText(channel);
+
+    if (contains && !text.includes(contains)) {
+      return { passed: false, reason: `Output channel "${channel}" does not contain: "${contains}"` };
+    }
+    if (notContains && text.includes(notContains)) {
+      return { passed: false, reason: `Output channel "${channel}" unexpectedly contains: "${notContains}"` };
     }
     return { passed: true };
   }

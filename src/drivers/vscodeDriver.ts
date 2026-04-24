@@ -125,9 +125,11 @@ export class VscodeDriver {
       // so the Language Server doesn't get confused by temp directory copies.
       const wsPath = this.options.workspacePath;
       const worktreeDir = await this.createWorktree(wsPath);
+      let openedWorkspacePath: string;
       if (worktreeDir) {
         console.log(`📂 Workspace (worktree): ${worktreeDir}`);
         args.push(worktreeDir);
+        openedWorkspacePath = worktreeDir;
       } else {
         // Fallback: copy workspace to temp dir (for non-git workspaces)
         const tmpDir = os.tmpdir();
@@ -146,6 +148,20 @@ export class VscodeDriver {
         fs.cpSync(wsPath, destDir, { recursive: true });
         console.log(`📂 Workspace (copy): ${destDir}`);
         args.push(destDir);
+        openedWorkspacePath = destDir;
+      }
+
+      // Inject workspace-level settings (takes precedence over user settings).
+      if (this.options.workspaceSettings && Object.keys(this.options.workspaceSettings).length > 0) {
+        const wsSettingsDir = path.join(openedWorkspacePath, ".vscode");
+        fs.mkdirSync(wsSettingsDir, { recursive: true });
+        const wsSettingsPath = path.join(wsSettingsDir, "settings.json");
+        const existing = fs.existsSync(wsSettingsPath)
+          ? JSON.parse(fs.readFileSync(wsSettingsPath, "utf-8"))
+          : {};
+        const merged = { ...existing, ...this.options.workspaceSettings };
+        fs.writeFileSync(wsSettingsPath, JSON.stringify(merged, null, 2));
+        console.log(`⚙️  Wrote workspace settings: ${wsSettingsPath}`);
       }
     } else if (this.options.filePath) {
       // Single file mode — copy the file to a temp dir and open it directly
@@ -788,7 +804,9 @@ export class VscodeDriver {
   /** Take a screenshot and return as buffer */
   async screenshot(outputPath?: string): Promise<Buffer> {
     const page = this.getPage();
-    const buffer = await page.screenshot({ fullPage: true });
+    // Use viewport-only screenshot; fullPage:true can trigger a synthetic
+    // scroll/resize in Electron that dismisses modal dialogs and popovers.
+    const buffer = await page.screenshot({ fullPage: false });
     if (outputPath) {
       fs.writeFileSync(outputPath, buffer);
     }
@@ -1459,6 +1477,58 @@ export class VscodeDriver {
 
     const output = await page.locator(".repl .monaco-list-rows").textContent().catch(() => "");
     return output ?? "";
+  }
+
+  /**
+   * Read the current text of a specific Output channel (e.g. "Maven for Java").
+   * Opens the Output panel, selects the channel via its dropdown, and returns
+   * the visible text from the Monaco editor backing the channel. Returns an
+   * empty string if the channel cannot be found (rather than throwing) so
+   * notContains assertions can still pass when the channel was never created.
+   */
+  async getOutputChannelText(channelName: string): Promise<string> {
+    const page = this.getPage();
+
+    // Ensure the bottom panel is visible.
+    const panel = page.locator(".part.panel").first();
+    if (!(await panel.isVisible().catch(() => false))) {
+      await page.keyboard.press("Control+j");
+      await page.waitForTimeout(300);
+    }
+
+    // Click the "Output" tab within the panel header (li with role="tab"
+    // containing an <a class="action-label"> with text "Output").
+    const outputTab = page.locator('.part.panel .composite-bar li.action-item[role="tab"]')
+      .filter({ has: page.locator('a.action-label', { hasText: /^Output$/i }) })
+      .first();
+    try {
+      await outputTab.click({ timeout: 3000 });
+      await page.waitForTimeout(400);
+    } catch {
+      // Fallback: keyboard shortcut for Output panel.
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await page.keyboard.press(`${modifier}+Shift+U`);
+      await page.waitForTimeout(400);
+    }
+
+    // The Output panel has a <select class="monaco-select-box"> dropdown in its
+    // title bar listing all registered channels. Pick the requested channel.
+    const dropdown = page.locator(".part.panel select.monaco-select-box").first();
+    if (await dropdown.count() > 0) {
+      try {
+        await dropdown.selectOption({ label: channelName });
+        await page.waitForTimeout(500);
+      } catch {
+        // Channel not registered yet — leave whatever is currently selected.
+      }
+    }
+
+    // Monaco renders the channel as a read-only editor with view-lines.
+    const lines = page.locator(".part.panel .monaco-editor .view-lines").first();
+    const raw = await lines.textContent().catch(() => "");
+    // Monaco renders spaces as \u00A0 (non-breaking space). Normalize to
+    // regular spaces so natural-language `contains` checks match.
+    return (raw ?? "").replace(/\u00A0/g, " ");
   }
 
   // ═══════════════════════════════════════════════════════

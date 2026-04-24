@@ -26,6 +26,8 @@ export interface TestSetup {
   /** Git repos to clone before running. Each entry: { url, path?, branch? } */
   repos?: RepoClone[];
   settings?: Record<string, unknown>;
+  /** Workspace-level settings injected into `<workspace>/.vscode/settings.json`. Takes effect only when a workspace is opened. */
+  workspaceSettings?: Record<string, unknown>;
   timeout?: number;
   /**
    * Workspace trust mode:
@@ -65,6 +67,7 @@ export interface TestStep {
   verifyDialog?: DialogVerification;
   verifyTreeItem?: TreeItemVerification;
   verifyEditorTab?: EditorTabVerification;
+  verifyOutputChannel?: OutputChannelVerification;
   timeout?: number;
   waitBefore?: number;
 }
@@ -88,6 +91,15 @@ export interface TreeItemVerification {
 export interface EditorTabVerification {
   /** Editor tab title to check */
   title: string;
+}
+
+export interface OutputChannelVerification {
+  /** Name of the Output channel (e.g. "Maven for Java") */
+  channel: string;
+  /** Channel text must contain this substring */
+  contains?: string;
+  /** Channel text must NOT contain this substring */
+  notContains?: string;
 }
 
 export interface FileVerification {
@@ -162,6 +174,8 @@ export interface VscodeDriverOptions {
   filePath?: string;
   userDataDir?: string;
   settings?: Record<string, unknown>;
+  /** Workspace-level settings injected into `<workspace>/.vscode/settings.json`. */
+  workspaceSettings?: Record<string, unknown>;
   launchArgs?: string[];
   /** Connect to an existing VSCode instance via CDP port instead of launching */
   attachPort?: number;

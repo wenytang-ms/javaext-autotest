@@ -48,6 +48,7 @@ export class TestRunner {
       workspacePath: plan.setup.workspace,
       filePath: plan.setup.file,
       settings: plan.setup.settings,
+      workspaceSettings: plan.setup.workspaceSettings,
       workspaceTrust: plan.setup.workspaceTrust,
       mockOpenDialog: plan.setup.mockOpenDialog,
     });

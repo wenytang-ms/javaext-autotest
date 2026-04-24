@@ -54,6 +54,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       verifyDialog: step.verifyDialog as TestStep["verifyDialog"],
       verifyTreeItem: step.verifyTreeItem as TestStep["verifyTreeItem"],
       verifyEditorTab: step.verifyEditorTab as TestStep["verifyEditorTab"],
+      verifyOutputChannel: step.verifyOutputChannel as TestStep["verifyOutputChannel"],
       timeout: step.timeout as number | undefined,
       waitBefore: step.waitBefore as number | undefined,
     };
@@ -80,6 +81,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
         : undefined,
       repos: parseRepos(setup.repos, planDir),
       settings: setup.settings as Record<string, unknown> | undefined,
+      workspaceSettings: setup.workspaceSettings as Record<string, unknown> | undefined,
       timeout: setup.timeout as number | undefined,
       workspaceTrust: parseWorkspaceTrust(setup.workspaceTrust),
       mockOpenDialog: parseMockOpenDialog(setup.mockOpenDialog, planDir),
