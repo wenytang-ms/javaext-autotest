@@ -278,6 +278,13 @@ export class ActionResolver {
 
       // ── Dialog ──
       {
+        regex: /(?:waitForDialog|等待对话框)(?:\s+(\d+))?/i,
+        handler: async (m) => {
+          const timeout = m[1] ? parseInt(m[1], 10) * 1000 : 10_000;
+          await d.waitForDialog(timeout);
+        },
+      },
+      {
         regex: /(?:clickDialogButton|点击对话框按钮)\s+(.+)/i,
         handler: async (m) => { await d.clickDialogButton(m[1].trim()); },
       },
