@@ -93,7 +93,7 @@ export class VscodeDriver {
             stdio: "pipe",
             timeout: 120_000,
             env: { ...process.env },
-            shell: true,
+            shell: process.platform === "win32",
           });
         } catch (e) {
           console.warn(`   ⚠️  Failed to install ${ext}: ${(e as Error).message}`);
