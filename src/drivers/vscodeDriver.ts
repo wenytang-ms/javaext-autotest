@@ -659,7 +659,11 @@ export class VscodeDriver {
   /** Select an option by name in the Command Palette dropdown */
   async selectPaletteOption(optionText: string): Promise<void> {
     const page = this.getPage();
-    const option = page.getByRole("option", { name: optionText }).locator("a");
+    // Try exact match first (so "compile" doesn't accidentally pick "test-compile"),
+    // then fall back to substring match for partial labels.
+    const exactOption = page.getByRole("option", { name: optionText, exact: true }).locator("a");
+    const fuzzyOption = page.getByRole("option", { name: optionText }).locator("a");
+    const option = (await exactOption.count()) > 0 ? exactOption : fuzzyOption;
     await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await option.click();
     await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});

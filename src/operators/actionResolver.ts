@@ -70,19 +70,19 @@ export class ActionResolver {
 
       // ── UI Navigation ──
       {
-        regex: /(?:点击侧边栏|click side tab)\s+(.+?)(?:\s*tab)?$/i,
+        regex: /(?:点击侧边栏|click side tab)\s+(.+?)\s*(?:tab)?$/i,
         handler: async (m) => { await d.activeSideTab(m[1]); },
       },
       {
-        regex: /(?:展开|点击|click|expand)\s+(.+?)(?:\s*节点|tree item)?$/i,
+        regex: /(?:展开|点击|click|expand)\s+(.+?)\s*(?:节点|tree item)?$/i,
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },
       {
-        regex: /(?:doubleClick|双击)\s+(.+?)(?:\s*节点|tree item)?$/i,
+        regex: /(?:doubleClick|双击)\s+(.+?)\s*(?:节点|tree item)?$/i,
         handler: async (m) => { await d.doubleClickTreeItem(m[1]); },
       },
       {
-        regex: /(?:选择|select)\s+(.+?)(?:\s*选项|option)?$/i,
+        regex: /(?:选择|select)\s+(.+?)\s*(?:选项|option)?$/i,
         handler: async (m) => { await d.selectPaletteOption(m[1]); },
       },
       {
@@ -281,6 +281,13 @@ export class ActionResolver {
       },
 
       // ── Dialog ──
+      {
+        regex: /(?:waitForDialog|等待对话框)(?:\s+(\d+))?/i,
+        handler: async (m) => {
+          const timeout = m[1] ? parseInt(m[1], 10) * 1000 : 10_000;
+          await d.waitForDialog(timeout);
+        },
+      },
       {
         regex: /(?:clickDialogButton|点击对话框按钮)\s+(.+)/i,
         handler: async (m) => { await d.clickDialogButton(m[1].trim()); },
