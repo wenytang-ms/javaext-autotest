@@ -74,6 +74,10 @@ export class ActionResolver {
         handler: async (m) => { await d.activeSideTab(m[1]); },
       },
       {
+        regex: /(?:collapseSidebarSection|折叠侧边栏区域)\s+(.+)/i,
+        handler: async (m) => { await d.collapseSidebarSection(m[1].trim()); },
+      },
+      {
         regex: /(?:展开|点击|click|expand)\s+(.+?)\s*(?:节点|tree item)?$/i,
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },

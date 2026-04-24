@@ -555,17 +555,32 @@ export class VscodeDriver {
     return page.getByRole("tab", { name: tabName }).isVisible();
   }
 
+  /** Collapse a sidebar section by its title (e.g., "Explorer", "Outline", "Timeline") */
+  async collapseSidebarSection(sectionLabel: string): Promise<void> {
+    const page = this.getPage();
+    const header = page.locator(`.pane-header[aria-expanded="true"]`).filter({ hasText: sectionLabel });
+    if (await header.count() > 0) {
+      await header.first().click();
+      await page.waitForTimeout(500);
+    }
+  }
+
   /** Click a tree item by its display name (excludes sticky scroll rows) */
   async clickTreeItem(name: string): Promise<void> {
     const page = this.getPage();
-    // VSCode sticky scroll creates duplicate tree items at viewport top.
-    // Use CSS :not(.monaco-tree-sticky-row) to exclude them.
-    const items = page.locator(`div[role="treeitem"]:not(.monaco-tree-sticky-row)`).filter({ hasText: name }).locator("a").first();
-    const fallback = page.getByRole("treeitem", { name }).locator("a").first();
-    const target = await items.count().catch(() => 0) > 0 ? items : fallback;
-    await target.waitFor({ state: "visible", timeout: 15_000 });
-    await target.scrollIntoViewIfNeeded();
-    await target.click();
+    // Use ARIA role matching (primary) — more reliable than CSS text matching.
+    // .first() handles cases where sticky scroll creates a duplicate treeitem.
+    const item = page.getByRole("treeitem", { name }).locator("a").first();
+    await item.waitFor({ state: "visible", timeout: 15_000 });
+    await item.scrollIntoViewIfNeeded();
+    // Check if click would be intercepted by a pane header (sticky section)
+    try {
+      await item.click({ timeout: 5_000 });
+    } catch {
+      // If intercepted, scroll the tree item further into view and retry
+      await page.evaluate((el) => el?.scrollIntoView({ block: "center" }), await item.elementHandle());
+      await item.click({ timeout: 5_000 });
+    }
     await page.waitForTimeout(500);
   }
 
@@ -616,10 +631,7 @@ export class VscodeDriver {
   /** Click an inline action button on a tree item (icons that appear on hover) */
   async clickTreeItemAction(itemName: string, actionLabel: string): Promise<void> {
     const page = this.getPage();
-    // Exclude sticky scroll duplicate rows
-    const treeItem = page.locator(`div[role="treeitem"]:not(.monaco-tree-sticky-row)`).filter({ hasText: itemName }).first();
-    const fallback = page.getByRole("treeitem", { name: itemName }).first();
-    const target = await treeItem.count().catch(() => 0) > 0 ? treeItem : fallback;
+    const target = page.getByRole("treeitem", { name: itemName }).first();
     await target.hover();
     await page.waitForTimeout(500);
     await target.locator(`a.action-label[role="button"][aria-label*="${actionLabel}"]`).click();
@@ -1642,10 +1654,7 @@ export class VscodeDriver {
   /** Right-click a tree item and select a context menu option */
   async contextMenuOnTreeItem(itemName: string, menuLabel: string): Promise<void> {
     const page = this.getPage();
-    // Exclude sticky scroll duplicate rows
-    const items = page.locator(`div[role="treeitem"]:not(.monaco-tree-sticky-row)`).filter({ hasText: itemName }).locator("a").first();
-    const fallback = page.getByRole("treeitem", { name: itemName }).locator("a").first();
-    const item = await items.count().catch(() => 0) > 0 ? items : fallback;
+    const item = page.getByRole("treeitem", { name: itemName }).locator("a").first();
     await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await item.click({ button: "right" });
 
