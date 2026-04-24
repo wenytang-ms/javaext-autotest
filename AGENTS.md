@@ -10,8 +10,14 @@ cd javaext-autotest
 # Run a single test plan
 npx autotest run test-plans/java-maven.yaml
 
+# Run a single test plan with a VSIX extension
+npx autotest run test-plans/plan.yaml --vsix path/to/extension.vsix
+
 # Run all test plans with aggregate summary
 npx autotest run-all test-plans --exclude java-fresh-import
+
+# Run all with VSIX and LLM analysis
+npx autotest run-all test-plans --vsix path/to/ext.vsix --output test-results
 
 # Validate test plan format
 npx autotest validate test-plans/<plan>.yaml
@@ -27,7 +33,7 @@ YAML Test Plan → PlanParser → TestRunner → ActionResolver → VscodeDriver
 
 - **VscodeDriver** — Playwright Electron wrapper, launches VSCode via `@vscode/test-electron`
 - **ActionResolver** — Maps natural language actions to Driver methods via regex patterns
-- **StepVerifier** — Deterministic verification (file, editor, problems, completion, notification)
+- **StepVerifier** — Deterministic verification (file, editor, problems, completion, notification, tree item, editor tab, dialog)
 - **LLMClient** — Azure OpenAI for post-failure screenshot analysis (optional)
 
 ## Test Plan YAML Structure
@@ -36,8 +42,9 @@ YAML Test Plan → PlanParser → TestRunner → ActionResolver → VscodeDriver
 name: "Plan Name"
 description: "What this tests"
 setup:
-  extension: "redhat.java"
-  extensions: ["vscjava.vscode-java-pack"]
+  extension: "redhat.java"                   # primary extension (auto-installed)
+  extensions: ["vscjava.vscode-java-pack"]   # additional marketplace extensions
+  vsix: ["../../path/to/local.vsix"]         # local VSIX files (relative to plan)
   vscodeVersion: "stable"
   workspace: "../../relative/path/to/project"   # relative to plan file
   # file: "../../path/to/File.java"             # single-file mode (no workspace)
@@ -45,6 +52,11 @@ setup:
   timeout: 90
   settings:                                      # injected into VSCode settings.json
     java.jdt.ls.java.home: "C:\\path\\to\\jdk"
+  workspaceTrust: "disabled"                     # "disabled" | "trusted" | "untrusted"
+  # Mock native file dialogs (showOpenDialog) — each entry consumed in order
+  # mockOpenDialog:
+  #   - ["~/libSource/simple.jar"]               # ~/ = workspace root
+  #   - ["~/path/to/folder"]
 
 steps:
   - id: "step-id"           # unique, descriptive kebab-case
@@ -61,6 +73,17 @@ steps:
       contains: "expected content"
     verifyCompletion:
       notEmpty: true
+    verifyTreeItem:          # verify tree item visibility
+      name: "my-app"
+      visible: true          # true (default) = must appear, false = must disappear
+      exact: false           # true = exact name match (avoid "App" matching "AppToDelete")
+    verifyEditorTab:         # verify editor tab exists
+      title: "App.java"
+    verifyDialog:
+      contains: "dialog text"
+      visible: true
+    verifyQuickInput:
+      noError: true
     timeout: 30              # step-level timeout (seconds)
     waitBefore: 5            # wait N seconds before executing
 ```
@@ -75,6 +98,7 @@ steps:
 | `insertLineInFile <path> <line> <text>` | **Disk write + Revert** — LS-aware, reliable |
 | `typeInEditor <text>` | Inject text via EditContext — LS may NOT detect changes |
 | `typeAndTriggerSnippet <word>` | Type + trigger IntelliSense snippet |
+| `deleteFile <path>` | Delete a file from disk |
 
 ### Navigation
 | Action | Description |
@@ -93,15 +117,43 @@ steps:
 | `organizeImports` | Shift+Alt+O |
 | `renameSymbol <newName>` | F2 rename |
 | `hoverOnText <text>` | Hover to trigger hover provider |
+| `dismissHover` | Dismiss hover popup |
 
 ### UI Operations
 | Action | Description |
 |--------|-------------|
 | `run command <Command Name>` | Execute via Command Palette (F1) |
-| `click <name> tree item` | Single-click tree node |
+| `selectCommand <Command Name>` | Open palette, type, click exact match (not Enter) |
+| `pressKey <key>` | Press a keyboard key (e.g. "Enter", "Escape") |
+| `click <name> tree item` | Single-click tree node (expands/collapses) |
 | `doubleClick <name> tree item` | Double-click to open file from Explorer |
-| `select <name> option` | Select from Quick Pick dropdown |
+| `select <name> option` | Select from Quick Pick dropdown by name |
+| `selectOptionByIndex <n>` | Select from Quick Pick dropdown by index (0-based) |
+| `click side tab <name>` | Click a sidebar tab (e.g. "Explorer") |
+| `collapseSidebarSection <name>` | Collapse an Explorer sidebar section by header text |
 | `wait <n> seconds` | Static wait |
+
+### Tree Item Actions
+| Action | Description |
+|--------|-------------|
+| `clickTreeItemAction <item> <label>` | Click inline hover button on tree item (e.g. "New...") |
+| `contextMenu <item> <menuLabel>` | Right-click tree item → select context menu option |
+| `openDependencyExplorer` | Open the Java Dependencies view |
+| `createNewFile <folder> <name>` | Create file via Explorer right-click → New File |
+
+### Quick Input / Dialog
+| Action | Description |
+|--------|-------------|
+| `fillQuickInput <text>` | Type text + press Enter in quick input box |
+| `fillAnyInput <text>` | Fill whichever input is visible (quick input OR inline tree rename) |
+| `typeInQuickInput <text>` | Type text into quick input (without confirming) |
+| `confirmQuickInput` | Press Enter in quick input |
+| `dismissQuickInput` | Press Escape to close quick input |
+| `clickDialogButton <label>` | Click a button in a modal dialog |
+| `tryClickDialogButton <label>` | Try to click dialog button (silently succeeds if no dialog) |
+| `confirmDialog` | Auto-confirm any visible dialog (platform-agnostic) |
+| `tryClickButton <label>` | Try to click any button in the workbench (e.g. "Apply") |
+| `waitForDialog [<seconds>]` | Wait for a modal dialog to appear |
 
 ### Debug
 | Action | Description |
@@ -110,6 +162,15 @@ steps:
 | `stopDebugSession` | Shift+F5 — safe if no session active |
 | `setBreakpoint <line>` | Toggle breakpoint at line |
 | `debugStepOver` / `debugStepInto` / `debugStepOut` | Throws if no active session |
+
+### Test Runner
+| Action | Description |
+|--------|-------------|
+| `openTestExplorer` | Open the Test Explorer view |
+| `waitForTestDiscovery <name> [<timeout>s]` | Wait for test item to appear |
+| `runAllTests` | Run all tests |
+| `runTestsWithProfile <profile>` | Run tests with a specific profile |
+| `clickCodeLens <label>` | Click a CodeLens action |
 
 ## ⚠️ Critical Gotchas — READ BEFORE WRITING TEST PLANS
 
@@ -198,26 +259,77 @@ When renaming a class symbol (e.g., `Foo` → `FooNew`), LS also renames the fil
     contains: "public class FooNew"
 ```
 
-### 9. `verifyFile` Path Resolution
+### 9. Rename via Context Menu (Cross-Platform)
+
+On some platforms, context menu "Rename" triggers VSCode's inline tree rename instead of the extension's `showInputBox`. Use `fillAnyInput` instead of `fillQuickInput` to handle both:
+
+```yaml
+- action: "contextMenu AppToRename Rename"
+- action: "fillAnyInput AppRenamed"      # ← handles both inline and quick input
+  waitBefore: 2
+- action: "confirmDialog"                # ← handle optional confirmation
+- action: "tryClickButton Apply"         # ← handle optional refactor preview
+```
+
+### 10. `verifyFile` Path Resolution
 
 - `~/path` → relative to workspace root (handles worktree paths automatically)
 - `absolute/path` → resolved as-is
 - Always use `~/` for workspace files — the actual workspace may be in a temp worktree
 
-### 10. Debug Requires Zero Compilation Errors
+### 11. Debug Requires Zero Compilation Errors
 
 `startDebugSession` checks problems count immediately after F5. If there are compilation errors, it throws within 1 second instead of waiting 30s for timeout.
 
-### 11. Process Cleanup Between Tests
+### 12. Process Cleanup Between Tests
 
 The framework kills its own VSCode process tree on `close()` via PID tracking. If tests crash, stale `Code.exe` processes may block the next launch. The `run-all` command handles this automatically.
 
-### 12. `--enable-smoke-test-driver` Effects
+### 13. `--enable-smoke-test-driver` Effects
 
 VSCode is launched with this flag, which:
 - Registers `window.driver` with `typeInEditor()` API (EditContext injection)
 - **Suppresses notification toasts** (no need to dismiss manually)
 - Sets `InAutomationContext` (suppresses some auto-focus behaviors)
+
+### 14. Electron Dialog Auto-Dismiss
+
+The framework automatically monkey-patches `dialog.showMessageBox` to auto-confirm native Electron dialogs (delete confirmations, rename confirmations, etc.). No manual handling needed for these dialogs.
+
+### 15. Sidebar Section Conflicts
+
+When the Java Projects view is inside the Explorer sidebar, other sections (file tree, Outline, Timeline) can consume all the vertical space. Use `collapseSidebarSection` to collapse them before interacting with Java Projects:
+
+```yaml
+- action: "collapseSidebarSection OUTLINE"
+- action: "collapseSidebarSection TIMELINE"
+- action: "run command Java Projects: Focus on Java Projects View"
+```
+
+### 16. Tree Item Name Case Sensitivity
+
+`getByRole("treeitem", { name })` is **case-insensitive**. If the Explorer has a folder called `INVISIBLE` and Java Projects has a node called `invisible`, they will both match. Be aware of this when working with projects whose names match sidebar section headers.
+
+## CLI Options
+
+### `autotest run <plan>`
+| Option | Description |
+|--------|-------------|
+| `--vsix <paths>` | Comma-separated VSIX files to install |
+| `--override <kv...>` | Override setup fields (e.g. `--override extensionPath=../../vscode-java`) |
+| `--output <dir>` | Output directory (default: `./test-results/<plan-name>`) |
+| `--no-llm` | Skip LLM verification |
+| `--attach <port>` | Connect to existing VSCode via CDP port |
+| `--interactive` | Step-by-step execution with manual confirmation |
+
+### `autotest run-all <dir>`
+| Option | Description |
+|--------|-------------|
+| `--vsix <paths>` | Comma-separated VSIX files (applied to all plans) |
+| `--override <kv...>` | Override setup fields for all plans |
+| `--output <dir>` | Output directory (default: `./test-results`) |
+| `--no-llm` | Skip LLM analysis |
+| `--exclude <plans>` | Comma-separated plan names to exclude |
 
 ## Test Output
 

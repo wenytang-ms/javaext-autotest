@@ -581,19 +581,17 @@ export class VscodeDriver {
     }
   }
 
-  /** Click a tree item by its display name (excludes sticky scroll rows) */
+  /** Click a tree item by its display name to expand/collapse it */
   async clickTreeItem(name: string): Promise<void> {
     const page = this.getPage();
-    // Use ARIA role matching (primary) — more reliable than CSS text matching.
-    // .first() handles cases where sticky scroll creates a duplicate treeitem.
+    // Use getByRole for ARIA matching — won't match section headers (role="button").
+    // Click the inner <a> link which triggers expand/collapse in VSCode trees.
     const item = page.getByRole("treeitem", { name }).locator("a").first();
     await item.waitFor({ state: "visible", timeout: 15_000 });
     await item.scrollIntoViewIfNeeded();
-    // Check if click would be intercepted by a pane header (sticky section)
     try {
       await item.click({ timeout: 5_000 });
     } catch {
-      // If intercepted, scroll the tree item further into view and retry
       await page.evaluate((el) => el?.scrollIntoView({ block: "center" }), await item.elementHandle());
       await item.click({ timeout: 5_000 });
     }
