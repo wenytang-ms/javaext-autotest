@@ -622,6 +622,40 @@ export class VscodeDriver {
     await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
+  /**
+   * Fill any visible input — tries quick input box first, then inline tree rename input.
+   * Useful when the input type depends on the platform or VSCode version.
+   */
+  async fillAnyInput(text: string): Promise<void> {
+    const page = this.getPage();
+
+    // Try quick input (showInputBox) first
+    const quickInput = page.locator(QUICK_INPUT_SELECTOR);
+    // Try inline tree rename input
+    const inlineInput = page.locator('.monaco-inputbox input:visible').first();
+
+    // Race: whichever appears first wins
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (await quickInput.isVisible().catch(() => false)) {
+        await quickInput.fill(text);
+        await page.waitForTimeout(300);
+        await page.keyboard.press(ENTER_KEY);
+        await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+        return;
+      }
+      if (await inlineInput.isVisible().catch(() => false)) {
+        await inlineInput.fill(text);
+        await page.waitForTimeout(300);
+        await page.keyboard.press(ENTER_KEY);
+        await page.waitForTimeout(500);
+        return;
+      }
+      await page.waitForTimeout(500);
+    }
+    throw new Error("No input field (quick input or inline rename) appeared within 15s");
+  }
+
   /** Select an option by name in the Command Palette dropdown */
   async selectPaletteOption(optionText: string): Promise<void> {
     const page = this.getPage();

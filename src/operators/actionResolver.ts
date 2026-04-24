@@ -264,6 +264,10 @@ export class ActionResolver {
         handler: async (m) => { await d.fillQuickInput(m[1].trim()); },
       },
       {
+        regex: /(?:fillAnyInput|填写任意输入框)\s+([\s\S]+)/i,
+        handler: async (m) => { await d.fillAnyInput(m[1].trim()); },
+      },
+      {
         regex: /(?:typeInQuickInput|在输入框中输入)\s+([\s\S]+)/i,
         handler: async (m) => { await d.typeInQuickInput(m[1].trim()); },
       },
