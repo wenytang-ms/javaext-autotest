@@ -200,6 +200,32 @@ export class VscodeDriver {
     // Wait for VSCode workbench to render
     await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: 30_000 });
 
+    // Auto-dismiss Electron native dialogs (e.g. redhat.java refactoring
+    // confirmation, delete file confirmation). These dialogs are outside
+    // the renderer DOM and cannot be handled via Playwright Page API.
+    // Must be after firstWindow() to avoid "execution context destroyed" errors.
+    try {
+      await this.app.evaluate(({ dialog }) => {
+        const confirmLabels = /^(OK|Delete|Move to Recycle Bin|Move to Trash)$/i;
+        dialog.showMessageBox = async (_win: any, opts: any) => {
+          const options = opts || _win;
+          const buttons: string[] = options?.buttons || [];
+          let idx = buttons.findIndex((b: string) => confirmLabels.test(b));
+          if (idx < 0) idx = 0;
+          return { response: idx, checkboxChecked: true };
+        };
+        dialog.showMessageBoxSync = (_win: any, opts: any) => {
+          const options = opts || _win;
+          const buttons: string[] = options?.buttons || [];
+          let idx = buttons.findIndex((b: string) => confirmLabels.test(b));
+          if (idx < 0) idx = 0;
+          return idx;
+        };
+      });
+    } catch {
+      console.warn("⚠️  Could not patch Electron dialogs — native dialogs may need manual handling");
+    }
+
     // Handle workspace trust prompt if trust mode is not disabled
     if (trustMode !== "disabled") {
       await this.handleWorkspaceTrustPrompt(trustMode);
@@ -502,7 +528,7 @@ export class VscodeDriver {
   async clickTreeItem(name: string): Promise<void> {
     const page = this.getPage();
     const item = page.getByRole("treeitem", { name }).locator("a").first();
-    await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await item.waitFor({ state: "visible", timeout: 15_000 });
     await item.scrollIntoViewIfNeeded();
     await item.click();
     await page.waitForTimeout(500);
@@ -522,6 +548,64 @@ export class VscodeDriver {
   async isTreeItemVisible(name: string): Promise<boolean> {
     const page = this.getPage();
     return page.getByRole("treeitem", { name }).isVisible();
+  }
+
+  /** Wait for a tree item to appear and become visible */
+  async waitForTreeItem(name: string, timeoutMs = 15_000, exact = false): Promise<boolean> {
+    const page = this.getPage();
+    try {
+      await page.getByRole("treeitem", { name, exact }).first().waitFor({
+        state: "visible",
+        timeout: timeoutMs,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Wait for a tree item to disappear from the view */
+  async waitForTreeItemGone(name: string, timeoutMs = 15_000, exact = false): Promise<boolean> {
+    const page = this.getPage();
+    try {
+      await page.getByRole("treeitem", { name, exact }).first().waitFor({
+        state: "hidden",
+        timeout: timeoutMs,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Click an inline action button on a tree item (icons that appear on hover) */
+  async clickTreeItemAction(itemName: string, actionLabel: string): Promise<void> {
+    const page = this.getPage();
+    const treeItem = page.getByRole("treeitem", { name: itemName });
+    await treeItem.hover();
+    await page.waitForTimeout(500);
+    await treeItem.locator(`a.action-label[role="button"][aria-label*="${actionLabel}"]`).click();
+    await page.waitForTimeout(500);
+  }
+
+  /** Wait for an editor tab with the given title to become visible */
+  async waitForEditorTab(title: string, timeoutMs = 15_000): Promise<boolean> {
+    const page = this.getPage();
+    try {
+      await page.getByRole("tab", { name: title }).first().waitFor({
+        state: "visible",
+        timeout: timeoutMs,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Type text into quick input and confirm with Enter (convenience method) */
+  async fillQuickInput(text: string): Promise<void> {
+    await this.typeInQuickInput(text);
+    await this.confirmQuickInput();
   }
 
   /** Select an option by name in the Command Palette dropdown */
@@ -1475,14 +1559,22 @@ export class VscodeDriver {
   /** Right-click a tree item and select a context menu option */
   async contextMenuOnTreeItem(itemName: string, menuLabel: string): Promise<void> {
     const page = this.getPage();
-    const item = page.getByRole("treeitem", { name: itemName }).locator("a");
+    const item = page.getByRole("treeitem", { name: itemName }).locator("a").first();
     await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await item.click({ button: "right" });
 
-    // Wait for context menu
-    const menu = page.locator(".context-view .action-label").filter({ hasText: menuLabel }).first();
+    // Wait for context menu — scope to .monaco-menu-container for precision
+    const menu = page.locator(".monaco-menu-container .monaco-menu");
     await menu.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await menu.click();
+    const menuItem = menu.getByRole("menuitem", { name: menuLabel });
+    await menuItem.first().waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await menuItem.first().hover();
+    // Wait for focus state before clicking to avoid flaky clicks
+    await page.locator(".monaco-menu-container .action-item.focused").waitFor({
+      state: "visible",
+      timeout: DEFAULT_TIMEOUT,
+    }).catch(() => {});
+    await menuItem.first().click();
     await page.waitForTimeout(500);
   }
 
@@ -1695,5 +1787,58 @@ export class VscodeDriver {
   async waitForDialog(timeoutMs: number = 10_000): Promise<void> {
     const page = this.getPage();
     await page.locator(".monaco-dialog-box").waitFor({ state: "visible", timeout: timeoutMs });
+  }
+
+  /** Try to click a dialog button if a dialog appears within timeout. Silently succeeds if no dialog. */
+  async tryClickDialogButton(label: string, timeoutMs = 5_000): Promise<void> {
+    try {
+      const page = this.getPage();
+      const dialog = page.locator(".monaco-dialog-box");
+      await dialog.waitFor({ state: "visible", timeout: timeoutMs });
+      await this.clickDialogButton(label);
+    } catch {
+      // No dialog appeared or button not found — that's OK
+    }
+  }
+
+  /** Confirm any visible dialog by clicking the first non-cancel button. Silently succeeds if no dialog. */
+  async confirmDialog(timeoutMs = 5_000): Promise<void> {
+    try {
+      const page = this.getPage();
+      const dialog = page.locator(".monaco-dialog-box");
+      await dialog.waitFor({ state: "visible", timeout: timeoutMs });
+
+      // Try common confirm labels first
+      const confirmLabels = ["OK", "Delete", "Move to Recycle Bin", "Move to Trash", "Yes", "Continue"];
+      for (const label of confirmLabels) {
+        const btn = dialog.getByRole("button", { name: label });
+        if (await btn.count() > 0) {
+          await btn.first().click();
+          return;
+        }
+      }
+
+      // Fallback: click the first button
+      const firstBtn = dialog.locator(".dialog-buttons button").first();
+      if (await firstBtn.count() > 0) {
+        await firstBtn.click();
+      }
+    } catch {
+      // No dialog appeared — that's OK
+    }
+  }
+
+  /** Try to click a button anywhere in the workbench (e.g., "Apply" in Refactor Preview). Silently succeeds if not found. */
+  async tryClickButton(label: string, timeoutMs = 3_000): Promise<void> {
+    try {
+      const page = this.getPage();
+      const btn = page.getByRole("button", { name: label });
+      if (await btn.isVisible({ timeout: timeoutMs }).catch(() => false)) {
+        await btn.first().click();
+        await page.waitForTimeout(500);
+      }
+    } catch {
+      // Button not found — that's OK
+    }
   }
 }

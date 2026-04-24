@@ -52,6 +52,8 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       verifyProblems: step.verifyProblems as TestStep["verifyProblems"],
       verifyCompletion: step.verifyCompletion as TestStep["verifyCompletion"],
       verifyDialog: step.verifyDialog as TestStep["verifyDialog"],
+      verifyTreeItem: step.verifyTreeItem as TestStep["verifyTreeItem"],
+      verifyEditorTab: step.verifyEditorTab as TestStep["verifyEditorTab"],
       timeout: step.timeout as number | undefined,
       waitBefore: step.waitBefore as number | undefined,
     };

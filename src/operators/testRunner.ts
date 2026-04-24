@@ -39,7 +39,11 @@ export class TestRunner {
     this.driver = new VscodeDriver({
       vscodeVersion: plan.setup.vscodeVersion,
       extensionPath: plan.setup.extensionPath,
-      extensions: plan.setup.extensions,
+      extensions: [
+        // setup.extension is the primary extension — install it too
+        ...(plan.setup.extension ? [plan.setup.extension] : []),
+        ...(plan.setup.extensions ?? []),
+      ],
       vsix: plan.setup.vsix,
       workspacePath: plan.setup.workspace,
       filePath: plan.setup.file,

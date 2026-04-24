@@ -56,6 +56,8 @@ export interface TestStep {
   verifyCompletion?: CompletionVerification;
   verifyQuickInput?: QuickInputVerification;
   verifyDialog?: DialogVerification;
+  verifyTreeItem?: TreeItemVerification;
+  verifyEditorTab?: EditorTabVerification;
   timeout?: number;
   waitBefore?: number;
 }
@@ -65,6 +67,20 @@ export interface DialogVerification {
   contains?: string;
   /** Dialog should be visible (true) or not visible (false). Defaults to true. */
   visible?: boolean;
+}
+
+export interface TreeItemVerification {
+  /** Tree item name to check */
+  name: string;
+  /** If true (default), verify the item is visible. If false, verify it has disappeared. */
+  visible?: boolean;
+  /** If true, match the tree item name exactly (not as substring) */
+  exact?: boolean;
+}
+
+export interface EditorTabVerification {
+  /** Editor tab title to check */
+  title: string;
 }
 
 export interface FileVerification {

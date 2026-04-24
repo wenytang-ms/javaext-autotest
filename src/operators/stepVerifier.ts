@@ -28,7 +28,8 @@ export class StepVerifier {
     // If no deterministic verification defined, auto-pass
     if (!step.verifyFile && !step.verifyNotification
         && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
-        && !step.verifyQuickInput && !step.verifyDialog) {
+        && !step.verifyQuickInput && !step.verifyDialog
+        && !step.verifyTreeItem && !step.verifyEditorTab) {
       return { passed: true };
     }
 
@@ -54,6 +55,12 @@ export class StepVerifier {
 
     const dialogResult = await this.verifyDialogCheck(step);
     if (dialogResult && !dialogResult.passed) return dialogResult;
+
+    const treeItemResult = await this.verifyTreeItemCheck(step);
+    if (treeItemResult && !treeItemResult.passed) return treeItemResult;
+
+    const editorTabResult = await this.verifyEditorTabCheck(step);
+    if (editorTabResult && !editorTabResult.passed) return editorTabResult;
 
     return { passed: true };
   }
@@ -329,6 +336,38 @@ export class StepVerifier {
       }
     }
 
+    return { passed: true };
+  }
+
+  private async verifyTreeItemCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+    if (!step.verifyTreeItem) return null;
+
+    const expectVisible = step.verifyTreeItem.visible !== false; // default true
+    const exact = step.verifyTreeItem.exact ?? false;
+    const timeoutMs = (step.timeout ?? 15) * 1000;
+
+    if (expectVisible) {
+      const found = await this.driver.waitForTreeItem(step.verifyTreeItem.name, timeoutMs, exact);
+      if (!found) {
+        return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not appear within ${timeoutMs / 1000}s` };
+      }
+    } else {
+      const gone = await this.driver.waitForTreeItemGone(step.verifyTreeItem.name, timeoutMs, exact);
+      if (!gone) {
+        return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not disappear within ${timeoutMs / 1000}s` };
+      }
+    }
+    return { passed: true };
+  }
+
+  private async verifyEditorTabCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+    if (!step.verifyEditorTab) return null;
+
+    const timeoutMs = (step.timeout ?? 15) * 1000;
+    const found = await this.driver.waitForEditorTab(step.verifyEditorTab.title, timeoutMs);
+    if (!found) {
+      return { passed: false, reason: `Editor tab "${step.verifyEditorTab.title}" did not appear within ${timeoutMs / 1000}s` };
+    }
     return { passed: true };
   }
 

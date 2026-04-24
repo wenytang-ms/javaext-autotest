@@ -85,6 +85,10 @@ export class ActionResolver {
         regex: /(?:选择|select)\s+(.+?)(?:\s*选项|option)?$/i,
         handler: async (m) => { await d.selectPaletteOption(m[1]); },
       },
+      {
+        regex: /(?:selectOptionByIndex|按索引选择)\s+(\d+)/i,
+        handler: async (m) => { await d.selectPaletteOptionByIndex(parseInt(m[1], 10)); },
+      },
 
       // ── File Operations ──
       {
@@ -236,6 +240,10 @@ export class ActionResolver {
 
       // ── File Explorer ──
       {
+        regex: /(?:clickTreeItemAction|点击树节点按钮)\s+(.+?)\s+(.+)/i,
+        handler: async (m) => { await d.clickTreeItemAction(m[1].trim(), m[2].trim()); },
+      },
+      {
         regex: /(?:createNewFile|创建文件)\s+(\S+)\s+(\S+)/i,
         handler: async (m) => { await d.createNewFileViaExplorer(m[1], m[2]); },
       },
@@ -251,6 +259,10 @@ export class ActionResolver {
       },
 
       // ── Quick Input ──
+      {
+        regex: /(?:fillQuickInput|填写输入框)\s+([\s\S]+)/i,
+        handler: async (m) => { await d.fillQuickInput(m[1].trim()); },
+      },
       {
         regex: /(?:typeInQuickInput|在输入框中输入)\s+([\s\S]+)/i,
         handler: async (m) => { await d.typeInQuickInput(m[1].trim()); },
@@ -268,6 +280,18 @@ export class ActionResolver {
       {
         regex: /(?:clickDialogButton|点击对话框按钮)\s+(.+)/i,
         handler: async (m) => { await d.clickDialogButton(m[1].trim()); },
+      },
+      {
+        regex: /(?:tryClickDialogButton|尝试点击对话框按钮)\s+(.+)/i,
+        handler: async (m) => { await d.tryClickDialogButton(m[1].trim()); },
+      },
+      {
+        regex: /(?:confirmDialog|确认对话框)/i,
+        handler: async () => { await d.confirmDialog(); },
+      },
+      {
+        regex: /(?:tryClickButton|尝试点击按钮)\s+(.+)/i,
+        handler: async (m) => { await d.tryClickButton(m[1].trim()); },
       },
       {
         regex: /(?:waitForDialog|等待对话框)\s*(?:(\d+)\s*(?:秒|seconds?|s))?/i,

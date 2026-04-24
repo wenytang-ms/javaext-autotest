@@ -172,7 +172,9 @@ program
   .option("--output <dir>", "Output directory (default: ./test-results)")
   .option("--no-llm", "Skip LLM analysis")
   .option("--exclude <plans>", "Comma-separated plan names to exclude", "java-fresh-import")
-  .action(async (dir: string, opts: { output?: string; llm?: boolean; exclude?: string }) => {
+  .option("--vsix <paths>", "Comma-separated VSIX file paths to install for all plans")
+  .option("--override <kv...>", "Override setup fields for all plans (e.g. --override extensionPath=../../vscode-java)")
+  .action(async (dir: string, opts: { output?: string; llm?: boolean; exclude?: string; vsix?: string; override?: string[] }) => {
     const { LLMClient } = await import("../operators/llmClient.js");
     const planFiles = fs.readdirSync(dir)
       .filter(f => f.endsWith(".yaml") || f.endsWith(".yml"))
@@ -199,6 +201,33 @@ program
 
       try {
         const plan = loadTestPlan(planPath);
+
+        // Apply --vsix to each plan
+        if (opts.vsix) {
+          const vsixPaths = opts.vsix.split(",").map(p => p.trim()).filter(Boolean);
+          plan.setup.vsix = [...(plan.setup.vsix ?? []), ...vsixPaths];
+        }
+
+        // Apply --override key=value pairs to each plan
+        if (opts.override) {
+          for (const kv of opts.override) {
+            const eqIdx = kv.indexOf("=");
+            if (eqIdx < 1) continue;
+            const key = kv.substring(0, eqIdx);
+            const value = kv.substring(eqIdx + 1);
+            if (key in plan.setup) {
+              const pathFields = ["extensionPath", "workspace", "file"];
+              if (value === "") {
+                (plan.setup as unknown as Record<string, unknown>)[key] = undefined;
+              } else {
+                (plan.setup as unknown as Record<string, unknown>)[key] = pathFields.includes(key)
+                  ? path.resolve(value)
+                  : value;
+              }
+            }
+          }
+        }
+
         const outputDir = path.join(outputBase, planName);
         const runner = new TestRunner(plan, { outputDir, noLLM: opts.llm === false });
 
