@@ -604,8 +604,15 @@ export class VscodeDriver {
 
   /** Type text into quick input and confirm with Enter (convenience method) */
   async fillQuickInput(text: string): Promise<void> {
-    await this.typeInQuickInput(text);
-    await this.confirmQuickInput();
+    // Wait longer for the quick input to appear — some operations (e.g., rename)
+    // show the input box with a delay after processing
+    const page = this.getPage();
+    const input = page.locator(QUICK_INPUT_SELECTOR);
+    await input.waitFor({ state: "visible", timeout: 15_000 });
+    await input.fill(text);
+    await page.waitForTimeout(500);
+    await page.keyboard.press(ENTER_KEY);
+    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   }
 
   /** Select an option by name in the Command Palette dropdown */
