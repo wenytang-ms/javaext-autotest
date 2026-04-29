@@ -14,6 +14,10 @@ export interface TestPlan {
 export interface TestSetup {
   extension: string;
   extensionPath?: string;
+  /** Additional local extension development paths to load. */
+  extensionPaths?: string[];
+  /** Local extension folders to copy into the VS Code extensions directory before launch. */
+  localExtensions?: string[];
   /** Marketplace extensions to install before launch (e.g. ["vscjava.vscode-java-pack"]) */
   extensions?: string[];
   /** Local VSIX files to install before launch (paths relative to test plan file) */
@@ -68,6 +72,7 @@ export interface TestStep {
   verifyTreeItem?: TreeItemVerification;
   verifyEditorTab?: EditorTabVerification;
   verifyOutputChannel?: OutputChannelVerification;
+  verifyTerminal?: TerminalVerification;
   timeout?: number;
   waitBefore?: number;
 }
@@ -99,6 +104,13 @@ export interface OutputChannelVerification {
   /** Channel text must contain this substring */
   contains?: string;
   /** Channel text must NOT contain this substring */
+  notContains?: string;
+}
+
+export interface TerminalVerification {
+  /** Terminal text must contain this substring */
+  contains?: string;
+  /** Terminal text must NOT contain this substring */
   notContains?: string;
 }
 
@@ -165,6 +177,10 @@ export interface Diagnostic {
 export interface VscodeDriverOptions {
   vscodeVersion?: "stable" | "insiders";
   extensionPath?: string;
+  /** Additional local extension development paths to load. */
+  extensionPaths?: string[];
+  /** Local extension folders to copy into the VS Code extensions directory before launch. */
+  localExtensions?: string[];
   /** Marketplace extension IDs to install before launch */
   extensions?: string[];
   /** Local VSIX file paths to install before launch */

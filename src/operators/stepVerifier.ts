@@ -30,7 +30,7 @@ export class StepVerifier {
         && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
         && !step.verifyQuickInput && !step.verifyDialog
         && !step.verifyTreeItem && !step.verifyEditorTab
-        && !step.verifyOutputChannel) {
+        && !step.verifyOutputChannel && !step.verifyTerminal) {
       return { passed: true };
     }
 
@@ -65,6 +65,9 @@ export class StepVerifier {
 
     const outputChannelResult = await this.verifyOutputChannelCheck(step);
     if (outputChannelResult && !outputChannelResult.passed) return outputChannelResult;
+
+    const terminalResult = await this.verifyTerminalCheck(step);
+    if (terminalResult && !terminalResult.passed) return terminalResult;
 
     return { passed: true };
   }
@@ -386,6 +389,32 @@ export class StepVerifier {
     }
     if (notContains && text.includes(notContains)) {
       return { passed: false, reason: `Output channel "${channel}" unexpectedly contains: "${notContains}"` };
+    }
+    return { passed: true };
+  }
+
+  private async verifyTerminalCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+    if (!step.verifyTerminal) return null;
+
+    const { contains, notContains } = step.verifyTerminal;
+    const maxWait = (step.timeout ?? 30) * 1000;
+    const pollInterval = 1000;
+    const deadline = Date.now() + maxWait;
+    let text = "";
+
+    while (Date.now() < deadline) {
+      text = await this.driver.getTerminalText();
+      const containsOk = !contains || text.includes(contains);
+      const notContainsOk = !notContains || !text.includes(notContains);
+      if (containsOk && notContainsOk) return { passed: true };
+      await this.driver.wait(pollInterval / 1000);
+    }
+
+    if (contains && !text.includes(contains)) {
+      return { passed: false, reason: `Terminal does not contain: "${contains}". Terminal text: ${text.slice(-1000)}` };
+    }
+    if (notContains && text.includes(notContains)) {
+      return { passed: false, reason: `Terminal unexpectedly contains: "${notContains}"` };
     }
     return { passed: true };
   }

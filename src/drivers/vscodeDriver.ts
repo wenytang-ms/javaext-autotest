@@ -60,6 +60,38 @@ export class VscodeDriver {
     const [cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
 
     const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "autotest-"));
+    const extensionsDir = baseArgs.find(a => a.startsWith("--extensions-dir="))?.split("=")[1];
+    const extensionDevelopmentPaths = [
+      ...(this.options.extensionPath ? [this.options.extensionPath] : []),
+      ...(this.options.extensionPaths ?? []),
+    ];
+
+    if (extensionsDir) {
+      for (const extensionDevelopmentPath of extensionDevelopmentPaths) {
+        this.removeInstalledExtensionDuplicate(extensionsDir, extensionDevelopmentPath);
+      }
+    }
+
+    if (this.options.localExtensions?.length) {
+      if (!extensionsDir) {
+        throw new Error("Unable to resolve VS Code extensions directory for local extension installation.");
+      }
+      fs.mkdirSync(extensionsDir, { recursive: true });
+      for (const extensionPath of this.options.localExtensions) {
+        const packageJsonPath = path.join(extensionPath, "package.json");
+        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+        const publisher = packageJson.publisher ?? "local";
+        const name = packageJson.name;
+        const version = packageJson.version ?? "0.0.0";
+        if (!name) {
+          throw new Error(`Local extension is missing package.json name: ${extensionPath}`);
+        }
+        const targetPath = path.join(extensionsDir, `${publisher}.${name}-${version}`);
+        fs.rmSync(targetPath, { recursive: true, force: true });
+        fs.cpSync(extensionPath, targetPath, { recursive: true });
+        console.log(`📦 Installed local extension: ${targetPath}`);
+      }
+    }
 
     // Wipe user data dir to prevent window restoration and stale file index.
     // Extensions are in a separate --extensions-dir so they won't be affected.
@@ -116,8 +148,8 @@ export class VscodeDriver {
       ...baseArgs,
     ];
 
-    if (this.options.extensionPath) {
-      args.push(`--extensionDevelopmentPath=${this.options.extensionPath}`);
+    for (const extensionPath of extensionDevelopmentPaths) {
+      args.push(`--extensionDevelopmentPath=${extensionPath}`);
     }
 
     if (this.options.workspacePath) {
@@ -541,6 +573,22 @@ export class VscodeDriver {
     await page.waitForTimeout(300);
   }
 
+  /** Execute a VS Code command through the smoke test driver. */
+  async executeVSCodeCommand(commandId: string, ...args: unknown[]): Promise<void> {
+    const resolvedArgs = args.map(arg => this.resolveWorkspacePlaceholders(arg));
+    await this.getPage().evaluate(
+      async ({ id, commandArgs }) => {
+        const driver = (window as any).driver;
+        if (!driver?.executeCommand) {
+          throw new Error("VS Code smoke test driver executeCommand API is not available.");
+        }
+        await driver.executeCommand(id, ...commandArgs);
+      },
+      { id: commandId, commandArgs: resolvedArgs }
+    );
+    await this.getPage().waitForTimeout(500);
+  }
+
   /** Run a command in the integrated terminal */
   async runInTerminal(command: string): Promise<void> {
     await this.runCommandFromPalette("Terminal: Create New Terminal");
@@ -550,6 +598,57 @@ export class VscodeDriver {
     await page.keyboard.type(command);
     await page.keyboard.press(ENTER_KEY);
     await page.waitForTimeout(1000);
+  }
+
+  /** Read visible integrated terminal text. */
+  async getTerminalText(): Promise<string> {
+    const page = this.getPage();
+    const panel = page.locator(".part.panel").first();
+    if (!(await panel.isVisible().catch(() => false))) {
+      await page.keyboard.press("Control+j");
+      await page.waitForTimeout(300);
+    }
+
+    const texts = await page.locator(".terminal-wrapper .xterm-rows, .xterm .xterm-rows").evaluateAll(elements =>
+      elements.map(element => element.textContent ?? "")
+    ).catch(() => []);
+    const buffers = await page.evaluate(async () => {
+      const driver = (window as unknown as { driver?: { getTerminalBuffer?: (selector: string) => Promise<string[]> } }).driver;
+      const terminals = Array.from(document.querySelectorAll(".terminal-wrapper .xterm, .xterm"));
+      const output: string[] = [];
+      for (let index = 0; index < terminals.length; index++) {
+        const selector = `.terminal-wrapper .xterm:nth-of-type(${index + 1}), .xterm:nth-of-type(${index + 1})`;
+        try {
+          if (driver?.getTerminalBuffer) {
+            output.push((await driver.getTerminalBuffer(selector)).join("\n"));
+          }
+        } catch {
+          // Fall back to DOM text below.
+        }
+      }
+      return output;
+    }).catch(() => []);
+    const raw = [...texts, ...buffers].join("\n--- terminal ---\n");
+    return raw.replace(/\u00A0/g, " ");
+  }
+
+  private resolveWorkspacePlaceholders(value: unknown): unknown {
+    if (typeof value === "string") {
+      const wsPath = this.getWorkspacePath();
+      return value.startsWith("~/") && wsPath ? path.join(wsPath, value.substring(2)) : value;
+    }
+    if (Array.isArray(value)) {
+      return value.map(item => this.resolveWorkspacePlaceholders(item));
+    }
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+          key,
+          this.resolveWorkspacePlaceholders(item)
+        ])
+      );
+    }
+    return value;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -581,7 +680,32 @@ export class VscodeDriver {
     }
   }
 
-  /** Click a tree item by its display name to expand/collapse it */
+  /** Collapse the first expanded workspace folder in the File Explorer tree. */
+  async collapseWorkspaceRoot(): Promise<void> {
+    const page = this.getPage();
+    const twistieBox = await page.evaluate(() => {
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>(
+        ".explorer-folders-view .monaco-list-row[aria-expanded='true'][aria-level='1'], " +
+        ".explorer-folders-view [role='treeitem'][aria-expanded='true'][aria-level='1']"
+      ));
+      const row = candidates.find(candidate => {
+        const rect = candidate.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+      const twistie = row?.querySelector<HTMLElement>(".monaco-tl-twistie");
+      const rect = twistie?.getBoundingClientRect();
+      return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : undefined;
+    });
+
+    if (twistieBox) {
+      await page.mouse.move(twistieBox.x + twistieBox.width / 2, twistieBox.y + twistieBox.height / 2);
+      await page.mouse.down({ button: "left" });
+      await page.mouse.up({ button: "left" });
+      await page.waitForTimeout(500);
+    }
+  }
+
+  /** Click a tree item by its display name (excludes sticky scroll rows) */
   async clickTreeItem(name: string): Promise<void> {
     const page = this.getPage();
     // Use getByRole for ARIA matching — won't match section headers (role="button").
@@ -596,6 +720,58 @@ export class VscodeDriver {
       await item.click({ timeout: 5_000 });
     }
     await page.waitForTimeout(500);
+  }
+
+  /** Expand a tree item by clicking its twistie if it is currently collapsed. */
+  async expandTreeItem(name: string): Promise<void> {
+    const page = this.getPage();
+    const exactItem = page.getByRole("treeitem", { name, exact: true }).first();
+    const item = await exactItem.count() > 0 ? exactItem : page.getByRole("treeitem", { name }).first();
+    await item.waitFor({ state: "visible", timeout: 15_000 });
+    await item.scrollIntoViewIfNeeded();
+
+    const expanded = await item.getAttribute("aria-expanded").catch(() => null);
+    if (expanded === "true") {
+      return;
+    }
+
+    const twistieBox = await item.evaluate((element) => {
+      const row = element.closest<HTMLElement>(".monaco-list-row") ?? element as HTMLElement;
+      const rowRect = row.getBoundingClientRect();
+      const twistie = row.querySelector<HTMLElement>(".monaco-tl-twistie");
+      const twistieRect = twistie?.getBoundingClientRect();
+      const indent = row.querySelector<HTMLElement>(".monaco-tl-indent");
+      const indentRect = indent?.getBoundingClientRect();
+      if (twistieRect && twistieRect.width > 0 && twistieRect.height > 0) {
+        return { x: twistieRect.x, y: twistieRect.y, width: twistieRect.width, height: twistieRect.height };
+      }
+      const fallbackX = (indentRect?.right ?? rowRect.left) + 8;
+      return { x: fallbackX - 8, y: rowRect.y, width: 16, height: rowRect.height };
+    });
+    if (!twistieBox) {
+      throw new Error(`Tree item "${name}" does not have an expandable twistie`);
+    }
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.mouse.move(twistieBox.x + twistieBox.width / 2, twistieBox.y + twistieBox.height / 2);
+      await page.mouse.down({ button: "left" });
+      await page.mouse.up({ button: "left" });
+      await page.waitForTimeout(500);
+      const currentExpanded = await item.getAttribute("aria-expanded").catch(() => null);
+      if (currentExpanded === "true") {
+        return;
+      }
+      await item.focus();
+      await page.keyboard.press("ArrowRight");
+      await page.waitForTimeout(500);
+      const expandedAfterKeyboard = await item.getAttribute("aria-expanded").catch(() => null);
+      if (expandedAfterKeyboard === "true") {
+        return;
+      }
+    }
+
+    const finalExpanded = await item.getAttribute("aria-expanded").catch(() => null);
+    throw new Error(`Tree item "${name}" did not expand. aria-expanded=${finalExpanded}`);
   }
 
   /** Double-click a tree item to open it (e.g., open a file from Explorer) */
@@ -645,11 +821,195 @@ export class VscodeDriver {
   /** Click an inline action button on a tree item (icons that appear on hover) */
   async clickTreeItemAction(itemName: string, actionLabel: string): Promise<void> {
     const page = this.getPage();
-    const target = page.getByRole("treeitem", { name: itemName }).first();
-    await target.hover();
-    await page.waitForTimeout(500);
-    await target.locator(`a.action-label[role="button"][aria-label*="${actionLabel}"]`).click();
-    await page.waitForTimeout(500);
+    const target = page.getByRole("treeitem", { name: itemName, exact: true }).first();
+    await target.waitFor({ state: "visible", timeout: 15_000 });
+
+    let lastActionInfo: unknown;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await target.evaluate((element) => {
+        const row = element.closest<HTMLElement>(".monaco-list-row");
+        row?.scrollIntoView({ block: "center", inline: "nearest" });
+      });
+      await page.waitForTimeout(300);
+
+      const rowBox = await target.evaluate((element) => {
+        const row = element.closest<HTMLElement>(".monaco-list-row");
+        const rect = row?.getBoundingClientRect();
+        return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : undefined;
+      });
+      if (!rowBox) {
+        break;
+      }
+
+      await page.mouse.move(rowBox.x + Math.min(rowBox.width / 2, 120), rowBox.y + rowBox.height / 2);
+      await page.waitForTimeout(500);
+
+      const actionInfo = await target.evaluate((element, label) => {
+        const row = element.closest<HTMLElement>(".monaco-list-row");
+        if (!row) return undefined;
+
+        const actions = row.querySelector<HTMLElement>(".actions");
+        const buttons = Array.from(row.querySelectorAll<HTMLElement>("a.action-label[role='button']"));
+        const button = buttons.find(candidate => candidate.getAttribute("aria-label")?.includes(label))
+          ?? buttons[buttons.length - 1];
+        const actionItem = button?.closest<HTMLElement>("li.action-item");
+        const actionItemRect = actionItem?.getBoundingClientRect();
+        const buttonRect = button?.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const actionsStyle = actions ? window.getComputedStyle(actions) : undefined;
+
+        if (!button || !buttonRect || !actionItem || !actionItemRect) {
+          return {
+            needsScroll: false,
+            row: rowRect.toJSON(),
+            actionsDisplay: actionsStyle?.display,
+            actionsVisibility: actionsStyle?.visibility,
+            buttons: buttons.map(candidate => ({
+              ariaLabel: candidate.getAttribute("aria-label"),
+              title: candidate.getAttribute("title"),
+              rect: candidate.getBoundingClientRect().toJSON()
+            }))
+          };
+        }
+
+        const viewportHeight = window.innerHeight;
+        const desiredTop = Math.max(80, Math.min(viewportHeight - 140, viewportHeight / 2));
+        const currentTop = buttonRect.top;
+        const needsScroll = currentTop < 40 || buttonRect.bottom > viewportHeight - 20;
+
+        if (needsScroll) {
+          const scrollers = Array.from(document.querySelectorAll<HTMLElement>(".monaco-scrollable-element"))
+            .filter(candidate => candidate.contains(row));
+          const scroller = scrollers
+            .find(candidate => candidate.scrollHeight > candidate.clientHeight)
+            ?? scrollers[scrollers.length - 1];
+          if (scroller) {
+            scroller.scrollTop += currentTop - desiredTop;
+          } else {
+            row.scrollIntoView({ block: "center", inline: "nearest" });
+          }
+        }
+
+        return {
+          needsScroll,
+          box: { x: actionItemRect.x, y: actionItemRect.y, width: actionItemRect.width, height: actionItemRect.height },
+          buttonBox: { x: buttonRect.x, y: buttonRect.y, width: buttonRect.width, height: buttonRect.height },
+          row: rowRect.toJSON(),
+          actionsDisplay: actionsStyle?.display,
+          actionsVisibility: actionsStyle?.visibility,
+          viewport: { width: window.innerWidth, height: viewportHeight },
+          buttons: buttons.map(candidate => ({
+            ariaLabel: candidate.getAttribute("aria-label"),
+            title: candidate.getAttribute("title"),
+            rect: candidate.getBoundingClientRect().toJSON()
+          }))
+        };
+      }, actionLabel);
+
+      lastActionInfo = actionInfo;
+      const box = actionInfo?.box;
+      if (!box) {
+        break;
+      }
+
+      if (actionInfo.needsScroll) {
+        await page.waitForTimeout(400);
+        continue;
+      }
+
+      const debugScreenshot = path.join(process.cwd(), "test-results", "maven-lifecycle-inline-action", "screenshots", `${itemName}-${actionLabel}-hover-before-click.png`);
+      fs.mkdirSync(path.dirname(debugScreenshot), { recursive: true });
+      await this.screenshot(debugScreenshot);
+
+      const centerX = box.x + box.width / 2;
+      const centerY = box.y + box.height / 2;
+      const hitTarget = await page.evaluate(({ x, y }) => {
+        const element = document.elementFromPoint(x, y);
+        const actionItem = element?.closest("li.action-item");
+        return {
+          tagName: element?.tagName,
+          className: element?.getAttribute("class"),
+          ariaLabel: element?.getAttribute("aria-label"),
+          title: element?.getAttribute("title"),
+          text: element?.textContent?.trim(),
+          actionItemClassName: actionItem?.getAttribute("class")
+        };
+      }, { x: centerX, y: centerY });
+      await target.evaluate((element, label) => {
+        const row = element.closest<HTMLElement>(".monaco-list-row");
+        const button = Array.from(row?.querySelectorAll<HTMLElement>("a.action-label[role='button']") ?? [])
+          .find(candidate => candidate.getAttribute("aria-label")?.includes(label));
+        const actionItem = button?.closest<HTMLElement>("li.action-item");
+        const events: unknown[] = [];
+        (window as unknown as { __treeActionEvents?: unknown[] }).__treeActionEvents = events;
+        for (const eventType of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+          actionItem?.addEventListener(eventType, event => {
+            const mouseEvent = event as MouseEvent;
+            events.push({
+              source: "actionItem",
+              type: eventType,
+              isTrusted: event.isTrusted,
+              target: (event.target as HTMLElement | null)?.tagName,
+              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
+              currentTargetClass: (event.currentTarget as HTMLElement | null)?.getAttribute("class"),
+              button: mouseEvent.button,
+              defaultPrevented: event.defaultPrevented,
+            });
+          }, true);
+          actionItem?.addEventListener(eventType, event => {
+            const mouseEvent = event as MouseEvent;
+            events.push({
+              source: "actionItemAfter",
+              type: eventType,
+              isTrusted: event.isTrusted,
+              target: (event.target as HTMLElement | null)?.tagName,
+              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
+              currentTargetClass: (event.currentTarget as HTMLElement | null)?.getAttribute("class"),
+              button: mouseEvent.button,
+              defaultPrevented: event.defaultPrevented,
+            });
+          });
+          button?.addEventListener(eventType, event => {
+            const mouseEvent = event as MouseEvent;
+            events.push({
+              source: "actionLabel",
+              type: eventType,
+              isTrusted: event.isTrusted,
+              target: (event.target as HTMLElement | null)?.tagName,
+              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
+              button: mouseEvent.button,
+              defaultPrevented: event.defaultPrevented,
+            });
+          }, true);
+          button?.addEventListener(eventType, event => {
+            const mouseEvent = event as MouseEvent;
+            events.push({
+              source: "actionLabelAfter",
+              type: eventType,
+              isTrusted: event.isTrusted,
+              target: (event.target as HTMLElement | null)?.tagName,
+              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
+              button: mouseEvent.button,
+              defaultPrevented: event.defaultPrevented,
+            });
+          });
+        }
+      }, actionLabel);
+      console.log(`   🔘 Tree item "${itemName}" action target: ${JSON.stringify({ actionInfo, hitTarget, debugScreenshot })}`);
+      await page.mouse.move(centerX, centerY);
+      await page.waitForTimeout(200);
+      await page.mouse.down({ button: "left" });
+      await page.waitForTimeout(100);
+      await page.mouse.up({ button: "left" });
+      await page.waitForTimeout(500);
+      const clickEvents = await page.evaluate(() => (window as unknown as { __treeActionEvents?: unknown[] }).__treeActionEvents ?? []);
+      const notifications = await this.getNotifications();
+      console.log(`   🖱️ Tree item "${itemName}" click events: ${JSON.stringify(clickEvents)}`);
+      console.log(`   🔔 Notifications after "${itemName}" action: ${JSON.stringify(notifications)}`);
+      return;
+    }
+
+    throw new Error(`Inline action "${actionLabel}" on tree item "${itemName}" was not clickable: ${JSON.stringify(lastActionInfo)}`);
   }
 
   /** Wait for an editor tab with the given title to become visible */
@@ -1722,8 +2082,11 @@ export class VscodeDriver {
   /** Right-click a tree item and select a context menu option */
   async contextMenuOnTreeItem(itemName: string, menuLabel: string): Promise<void> {
     const page = this.getPage();
-    const item = page.getByRole("treeitem", { name: itemName }).locator("a").first();
+    const exactItem = page.getByRole("treeitem", { name: itemName, exact: true }).locator("a").first();
+    const fuzzyItem = page.getByRole("treeitem", { name: itemName }).locator("a").first();
+    const item = await exactItem.count() > 0 ? exactItem : fuzzyItem;
     await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await item.scrollIntoViewIfNeeded();
     await item.click({ button: "right" });
 
     // Wait for context menu — scope to .monaco-menu-container for precision
@@ -1901,6 +2264,29 @@ export class VscodeDriver {
     const relPath = path.relative(gitRoot, workspacePath);
     const worktreeWorkspace = path.join(worktreeDir, relPath);
     return worktreeWorkspace;
+  }
+
+  private removeInstalledExtensionDuplicate(extensionsDir: string, extensionDevelopmentPath: string): void {
+    const packageJsonPath = path.join(extensionDevelopmentPath, "package.json");
+    if (!fs.existsSync(packageJsonPath) || !fs.existsSync(extensionsDir)) {
+      return;
+    }
+
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
+    const publisher = packageJson.publisher;
+    const name = packageJson.name;
+    if (!publisher || !name) {
+      return;
+    }
+
+    const extensionPrefix = `${publisher}.${name}-`.toLowerCase();
+    for (const entry of fs.readdirSync(extensionsDir)) {
+      if (entry.toLowerCase().startsWith(extensionPrefix)) {
+        const installedExtensionPath = path.join(extensionsDir, entry);
+        fs.rmSync(installedExtensionPath, { recursive: true, force: true });
+        console.log(`🧹 Removed installed extension duplicate: ${installedExtensionPath}`);
+      }
+    }
   }
 
   // ═══════════════════════════════════════════════════════

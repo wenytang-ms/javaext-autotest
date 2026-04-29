@@ -55,6 +55,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       verifyTreeItem: step.verifyTreeItem as TestStep["verifyTreeItem"],
       verifyEditorTab: step.verifyEditorTab as TestStep["verifyEditorTab"],
       verifyOutputChannel: step.verifyOutputChannel as TestStep["verifyOutputChannel"],
+      verifyTerminal: step.verifyTerminal as TestStep["verifyTerminal"],
       timeout: step.timeout as number | undefined,
       waitBefore: step.waitBefore as number | undefined,
     };
@@ -67,6 +68,12 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       extension: setup.extension as string,
       extensionPath: setup.extensionPath
         ? path.resolve(planDir, setup.extensionPath as string)
+        : undefined,
+      extensionPaths: Array.isArray(setup.extensionPaths)
+        ? (setup.extensionPaths as string[]).map(extensionPath => path.resolve(planDir, extensionPath))
+        : undefined,
+      localExtensions: Array.isArray(setup.localExtensions)
+        ? (setup.localExtensions as string[]).map(extensionPath => path.resolve(planDir, extensionPath))
         : undefined,
       extensions: setup.extensions as string[] | undefined,
       vsix: Array.isArray(setup.vsix)

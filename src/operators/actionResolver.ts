@@ -67,6 +67,13 @@ export class ActionResolver {
         regex: /(?:pressKey|按键)\s+(.+)/i,
         handler: async (m) => { await d.pressKey(m[1].trim()); },
       },
+      {
+        regex: /(?:executeVSCodeCommand|执行VSCode命令)\s+(\S+)(?:\s+([\s\S]+))?/i,
+        handler: async (m) => {
+          const args = m[2] ? [JSON.parse(m[2])] : [];
+          await d.executeVSCodeCommand(m[1].trim(), ...args);
+        },
+      },
 
       // ── UI Navigation ──
       {
@@ -76,6 +83,22 @@ export class ActionResolver {
       {
         regex: /(?:collapseSidebarSection|折叠侧边栏区域)\s+(.+)/i,
         handler: async (m) => { await d.collapseSidebarSection(m[1].trim()); },
+      },
+      {
+        regex: /(?:collapseWorkspaceRoot|折叠工作区根节点)$/i,
+        handler: async () => { await d.collapseWorkspaceRoot(); },
+      },
+      {
+        regex: /(?:expandTreeItem|展开树节点)\s+(.+)/i,
+        handler: async (m) => { await d.expandTreeItem(m[1].trim()); },
+      },
+      {
+        regex: /(?:clickTreeItemAction|点击树节点按钮)\s+(.+?)\s+(.+)/i,
+        handler: async (m) => { await d.clickTreeItemAction(m[1].trim(), m[2].trim()); },
+      },
+      {
+        regex: /(?:contextMenu|右键菜单)\s+(\S+)\s+(.+)/i,
+        handler: async (m) => { await d.contextMenuOnTreeItem(m[1], m[2].trim()); },
       },
       {
         regex: /(?:展开|点击|click|expand)\s+(.+?)\s*(?:节点|tree item)?$/i,
@@ -244,16 +267,8 @@ export class ActionResolver {
 
       // ── File Explorer ──
       {
-        regex: /(?:clickTreeItemAction|点击树节点按钮)\s+(.+?)\s+(.+)/i,
-        handler: async (m) => { await d.clickTreeItemAction(m[1].trim(), m[2].trim()); },
-      },
-      {
         regex: /(?:createNewFile|创建文件)\s+(\S+)\s+(\S+)/i,
         handler: async (m) => { await d.createNewFileViaExplorer(m[1], m[2]); },
-      },
-      {
-        regex: /(?:contextMenu|右键菜单)\s+(\S+)\s+(.+)/i,
-        handler: async (m) => { await d.contextMenuOnTreeItem(m[1], m[2].trim()); },
       },
 
       // ── Dependency tree ──
