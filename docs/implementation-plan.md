@@ -1,101 +1,114 @@
-# 实现计划
+# Implementation Plan
 
-## Phase 1：基础框架搭建
+## Phase 1: Foundation
 
-### 1.1 项目初始化
-- 初始化 npm 项目，配置 TypeScript
-- 安装核心依赖：`@playwright/test`, `@vscode/test-electron`, `commander`, `js-yaml`
-- 配置 tsconfig、eslint
+### 1.1 Project bootstrap
 
-### 1.2 VscodeDriver 核心
-- 实现 VSCode 启动/关闭（Playwright Electron）
-- 实现 `runCommand()` — 执行 VSCode 命令
-- 实现 `runCommandFromPalette()` — Command Palette 操作
-- 实现 `snapshot()` — 获取 A11y 树
-- 实现 `screenshot()` — 截图
+- Initialize the npm project and TypeScript configuration.
+- Install core dependencies: `@playwright/test`, `@vscode/test-electron`, `commander`, and `js-yaml`.
+- Configure `tsconfig` and linting.
 
-### 1.3 基础验证能力
-- `isElementVisible()` — 元素可见性检查
-- `getNotifications()` — 读取通知
-- `fileExists()` / `fileContains()` — 文件系统验证
+### 1.2 VscodeDriver core
 
----
+- Implement VS Code launch and shutdown through Playwright Electron.
+- Implement `runCommand()` for direct VS Code command execution.
+- Implement `runCommandFromPalette()` for Command Palette automation.
+- Implement `snapshot()` for accessibility tree capture.
+- Implement `screenshot()` for visual artifacts.
 
-## Phase 2：操作原语完善
+### 1.3 Basic verification
 
-### 2.1 编辑器操作
-- `openFile()` — 打开文件
-- `getEditorContent()` / `setEditorContent()` — 读写编辑器
-- `saveFile()` — 保存文件
-
-### 2.2 UI 交互
-- `activeSideTab()` — 切换侧边栏
-- `clickTreeItem()` / `expandTreeItem()` — TreeView 操作
-- `selectPaletteOption()` — Command Palette 选项选择
-
-### 2.3 终端操作
-- `runInTerminal()` — 在集成终端执行命令
-- `getTerminalText()` — 读取终端输出
+- `isElementVisible()` checks element visibility.
+- `getNotifications()` reads notification text.
+- `fileExists()` / `fileContains()` verify filesystem state.
 
 ---
 
-## Phase 3：Test Plan 引擎
+## Phase 2: Driver primitives
 
-### 3.1 Plan 解析器
-- YAML Test Plan 解析
-- Setup 阶段执行（配置注入、扩展加载等待）
-- Step 顺序执行框架
+### 2.1 Editor operations
 
-### 3.2 确定性验证引擎
-- `verifyFile` — 文件验证
-- `verifyNotification` — 通知验证
-- `verifyEditor` — 编辑器内容验证
-- `verifyProblems` / `verifyCompletion` / `verifyQuickInput` / `verifyDialog`
-- `verifyTreeItem` / `verifyEditorTab` / `verifyOutputChannel` / `verifyTerminal`
+- `openFile()` opens a file.
+- `getEditorContent()` / `setEditorContent()` read and write editor content.
+- `saveFile()` saves the active file.
 
-### 3.3 结果报告
-- 每一步的 pass/fail + 原因
-- 失败时附带 before/after/error 截图
-- JSON 格式输出（可对接 CI）
+### 2.2 UI interactions
+
+- `activeSideTab()` switches side bar tabs.
+- `clickTreeItem()` / `expandTreeItem()` operate on TreeView nodes.
+- `selectPaletteOption()` selects Command Palette / Quick Pick options.
+
+### 2.3 Terminal operations
+
+- `runInTerminal()` runs a command in the integrated terminal.
+- `getTerminalText()` reads terminal output.
 
 ---
 
-## Phase 4：LLM 失败分析层
+## Phase 3: Test plan engine
+
+### 3.1 Plan parser
+
+- Parse YAML test plans.
+- Run setup tasks such as configuration injection and extension activation waits.
+- Execute steps sequentially.
+
+### 3.2 Deterministic verifier
+
+- `verifyFile` verifies files.
+- `verifyNotification` verifies notifications.
+- `verifyEditor` verifies editor content.
+- `verifyProblems` / `verifyCompletion` / `verifyQuickInput` / `verifyDialog` cover language-service and UI state.
+- `verifyTreeItem` / `verifyEditorTab` / `verifyOutputChannel` / `verifyTerminal` cover workbench surfaces.
+
+### 3.3 Reporting
+
+- Record pass/fail status and reasons for every step.
+- Attach before/after/error screenshots for failed or errored steps.
+- Emit JSON output for CI and automation.
+
+---
+
+## Phase 4: LLM failure analysis
 
 ### 4.1 ActionResolver
-- 将自然语言 action 映射到 Driver 原语调用
-- 提供 regex 操作词典；未匹配时回退到 Command Palette
 
-### 4.2 Azure OpenAI 截图分析
-- 当确定性验证失败或步骤报错时，将 before/after 截图发送给 Azure OpenAI
-- 使用 `verify` 自然语言描述作为预期上下文
-- 返回 reasoning + suggestion；pass/fail 仍由确定性验证决定
+- Map natural-language-like action strings to Driver primitive calls.
+- Provide a regex-based action dictionary; unmatched actions fall back to Command Palette execution.
 
-### 4.3 汇总分析
-- `run-all` 和 `analyze` 可基于多个 `results.json` 生成 `summary.md`
-- 已配置 LLM 时为失败计划生成聚合分析
+### 4.2 Azure OpenAI screenshot analysis
+
+- When deterministic verification fails or a step errors, send before/after screenshots to Azure OpenAI.
+- Use the step's `verify` description as the expected-outcome context.
+- Return reasoning and suggestions while keeping pass/fail decisions deterministic.
+
+### 4.3 Aggregate analysis
+
+- `run-all` and `analyze` generate `summary.md` from multiple `results.json` files.
+- When LLM configuration is available, failed plans receive aggregate analysis.
 
 ---
 
-## Phase 5：CLI 封装
+## Phase 5: CLI wrapper
 
-### 5.1 命令行接口
+### 5.1 Command-line interface
+
 ```bash
-# 执行单个 test plan
+# Run one test plan
 autotest run test-plans/tree-view.yaml
 
-# 执行所有 test plans
+# Run all test plans
 autotest run-all test-plans
 
-# 仅验证 test plan 格式
+# Validate a test plan
 autotest validate test-plans/tree-view.yaml
 
-# 分析已有 test-results
+# Analyze existing test results
 autotest analyze test-results
 ```
 
-### 5.2 配置入口
+### 5.2 Configuration entry points
 
-- Test plan 的 `setup` 字段负责 VS Code 版本、扩展、VSIX、workspace/file、settings、workspace trust、mock dialogs 等运行配置。
-- LLM 通过环境变量配置：`AZURE_OPENAI_ENDPOINT`、`AZURE_OPENAI_API_KEY`、`AZURE_OPENAI_DEPLOYMENT`、`AZURE_OPENAI_API_VERSION`。
-- 报告输出由 CLI `--output` 指定，目录内包含 `results.json`、`screenshots/` 和批量运行的 `summary.md`。
+- The test plan `setup` section configures VS Code version, extensions, VSIX files, workspace/file mode, settings, workspace trust, mocked dialogs, and related runtime options.
+- LLM analysis is configured through environment variables: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT`, and `AZURE_OPENAI_API_VERSION`.
+- Report output is controlled by the CLI `--output` option. The output directory contains `results.json`, `screenshots/`, and `summary.md` for aggregate runs.

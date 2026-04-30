@@ -56,23 +56,23 @@ export class ActionResolver {
     return [
       // ── Command Palette ──
       {
-        regex: /(?:selectCommand|选择命令)\s+(.+)/i,
+        regex: /selectCommand\s+(.+)/i,
         handler: async (m) => { await d.selectAndRunCommand(m[1]); },
       },
       {
-        regex: /(?:执行命令|run command)\s+(.+)/i,
+        regex: /run command\s+(.+)/i,
         handler: async (m) => { await d.runCommandFromPalette(m[1]); },
       },
       {
-        regex: /(?:pressKey|按键)\s+(.+)/i,
+        regex: /pressKey\s+(.+)/i,
         handler: async (m) => { await d.pressKey(m[1].trim()); },
       },
       {
-        regex: /(?:pressTerminalKey|终端按键)\s+(.+)/i,
+        regex: /pressTerminalKey\s+(.+)/i,
         handler: async (m) => { await d.pressTerminalKey(m[1].trim()); },
       },
       {
-        regex: /(?:executeVSCodeCommand|执行VSCode命令)\s+(\S+)(?:\s+([\s\S]+))?/i,
+        regex: /executeVSCodeCommand\s+(\S+)(?:\s+([\s\S]+))?/i,
         handler: async (m) => {
           const args = m[2] ? [JSON.parse(m[2])] : [];
           await d.executeVSCodeCommand(m[1].trim(), ...args);
@@ -81,165 +81,165 @@ export class ActionResolver {
 
       // ── UI Navigation ──
       {
-        regex: /(?:点击侧边栏|click side tab)\s+(.+?)\s*(?:tab)?$/i,
+        regex: /click side tab\s+(.+?)\s*(?:tab)?$/i,
         handler: async (m) => { await d.activeSideTab(m[1]); },
       },
       {
-        regex: /(?:collapseSidebarSection|折叠侧边栏区域)\s+(.+)/i,
+        regex: /collapseSidebarSection\s+(.+)/i,
         handler: async (m) => { await d.collapseSidebarSection(m[1].trim()); },
       },
       {
-        regex: /(?:collapseWorkspaceRoot|折叠工作区根节点)$/i,
+        regex: /collapseWorkspaceRoot$/i,
         handler: async () => { await d.collapseWorkspaceRoot(); },
       },
       {
-        regex: /(?:expandTreeItem|展开树节点)\s+(.+)/i,
+        regex: /expandTreeItem\s+(.+)/i,
         handler: async (m) => { await d.expandTreeItem(m[1].trim()); },
       },
       {
-        regex: /(?:clickTreeItemAction|点击树节点按钮)\s+(.+?)\s+(.+)/i,
+        regex: /clickTreeItemAction\s+(.+?)\s+(.+)/i,
         handler: async (m) => { await d.clickTreeItemAction(m[1].trim(), m[2].trim()); },
       },
       {
-        regex: /(?:contextMenu|右键菜单)\s+(\S+)\s+(.+)/i,
+        regex: /contextMenu\s+(\S+)\s+(.+)/i,
         handler: async (m) => { await d.contextMenuOnTreeItem(m[1], m[2].trim()); },
       },
       {
-        regex: /(?:展开|点击|click|expand)\s+(.+?)\s*(?:节点|tree item)?$/i,
+        regex: /(?:click|expand)\s+(.+?)\s*(?:tree item)?$/i,
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },
       {
-        regex: /(?:doubleClick|双击)\s+(.+?)\s*(?:节点|tree item)?$/i,
+        regex: /doubleClick\s+(.+?)\s*(?:tree item)?$/i,
         handler: async (m) => { await d.doubleClickTreeItem(m[1]); },
       },
       {
-        regex: /(?:选择|select)\s+(.+?)\s*(?:选项|option)?$/i,
+        regex: /select\s+(.+?)\s*(?:option)?$/i,
         handler: async (m) => { await d.selectPaletteOption(m[1]); },
       },
       {
-        regex: /(?:selectOptionByIndex|按索引选择)\s+(\d+)/i,
+        regex: /selectOptionByIndex\s+(\d+)/i,
         handler: async (m) => { await d.selectPaletteOptionByIndex(parseInt(m[1], 10)); },
       },
 
       // ── File Operations ──
       {
-        regex: /(?:打开文件|open file)\s+(.+)/i,
+        regex: /open file\s+(.+)/i,
         handler: async (m) => { await d.openFile(m[1]); },
       },
       {
-        regex: /(?:savefile|保存文件)/i,
+        regex: /savefile/i,
         handler: async () => { await d.saveFile(); },
       },
       {
-        regex: /(?:insertLineInFile|在文件中插入行)\s+(\S+)\s+(\d+)\s+([\s\S]+)/i,
+        regex: /insertLineInFile\s+(\S+)\s+(\d+)\s+([\s\S]+)/i,
         handler: async (m) => {
           await d.insertLineInFile(m[1], parseInt(m[2], 10), m[3].trim());
         },
       },
       {
-        regex: /(?:deleteFile|删除文件)\s+(.+)/i,
+        regex: /deleteFile\s+(.+)/i,
         handler: async (m) => { await d.deleteFile(m[1].trim()); },
       },
 
       // ── Wait ──
       // IMPORTANT: waitForLanguageServer must be before generic "wait" pattern
       {
-        regex: /(?:waitForLanguageServer|等待语言服务器)/i,
+        regex: /waitForLanguageServer/i,
         handler: async () => {
           const ready = await d.waitForLanguageServer(lsTimeout);
           if (!ready) throw new Error("Language Server did not become ready within timeout");
         },
       },
       {
-        regex: /(?:等待|wait)\s*(?:(\d+)\s*(?:秒|seconds?|s))?/i,
+        regex: /wait\s*(?:(\d+)\s*(?:seconds?|s))?/i,
         handler: async (m) => { await d.wait(parseInt(m[1] ?? "3", 10)); },
       },
 
       // ── Cursor Navigation ──
       {
-        regex: /(?:goToLine|跳转到行)\s+(\d+)/i,
+        regex: /goToLine\s+(\d+)/i,
         handler: async (m) => { await d.goToLine(parseInt(m[1], 10)); },
       },
       {
-        regex: /(?:goToEndOfLine|跳转到行尾)/i,
+        regex: /goToEndOfLine/i,
         handler: async () => { await d.goToEndOfLine(); },
       },
 
       // ── Editor Input ──
       {
-        regex: /(?:typeAndTriggerSnippet|输入代码片段)\s+(.+)/i,
+        regex: /typeAndTriggerSnippet\s+(.+)/i,
         handler: async (m) => { await d.typeAndTriggerSnippet(m[1].trim()); },
       },
       {
-        regex: /(?:typeInEditor|在编辑器中输入)\s+([\s\S]+)/i,
+        regex: /typeInEditor\s+([\s\S]+)/i,
         handler: async (m) => { await d.typeInEditor(m[1].trim()); },
       },
 
       // ── Code Intelligence ──
       {
-        regex: /(?:navigateToError|跳转到错误)\s*(\d+)?/i,
+        regex: /navigateToError\s*(\d+)?/i,
         handler: async (m) => {
           await d.navigateToError(parseInt(m[1] ?? "1", 10));
         },
       },
       {
-        regex: /(?:applyCodeAction|应用代码操作)\s+(.+)/i,
+        regex: /applyCodeAction\s+(.+)/i,
         handler: async (m) => { await d.applyCodeAction(m[1].trim()); },
       },
       {
-        regex: /(?:findText|查找文本)\s+(.+)/i,
+        regex: /findText\s+(.+)/i,
         handler: async (m) => { await d.findText(m[1].trim()); },
       },
       {
-        regex: /(?:renameSymbol|重命名)\s+(.+)/i,
+        regex: /renameSymbol\s+(.+)/i,
         handler: async (m) => { await d.renameSymbol(m[1].trim()); },
       },
       {
-        regex: /(?:organizeImports|整理导入)/i,
+        regex: /organizeImports/i,
         handler: async () => { await d.organizeImports(); },
       },
       {
-        regex: /^(?:triggerCompletion|触发代码补全)$/i,
+        regex: /^triggerCompletion$/i,
         handler: async () => { await d.triggerCompletion(); },
       },
       {
-        regex: /(?:triggerCompletionAt|在位置触发补全)\s+(.+)/i,
+        regex: /triggerCompletionAt\s+(.+)/i,
         handler: async () => { await d.triggerCompletion(); },
       },
 
       // ── Debugging ──
       {
-        regex: /(?:startDebugSession|启动调试)/i,
+        regex: /startDebugSession/i,
         handler: async () => { await d.startDebugSession(); },
       },
       {
-        regex: /(?:stopDebugSession|停止调试)/i,
+        regex: /stopDebugSession/i,
         handler: async () => { await d.stopDebugSession(); },
       },
       {
-        regex: /(?:setBreakpoint|设置断点)\s+(\d+)/i,
+        regex: /setBreakpoint\s+(\d+)/i,
         handler: async (m) => { await d.setBreakpoint(parseInt(m[1], 10)); },
       },
       {
-        regex: /(?:debugStepOver|单步跳过)/i,
+        regex: /debugStepOver/i,
         handler: async () => { await d.debugStepOver(); },
       },
       {
-        regex: /(?:debugStepInto|单步进入)/i,
+        regex: /debugStepInto/i,
         handler: async () => { await d.debugStepInto(); },
       },
       {
-        regex: /(?:debugStepOut|单步跳出)/i,
+        regex: /debugStepOut/i,
         handler: async () => { await d.debugStepOut(); },
       },
 
       // ── Test Runner ──
       {
-        regex: /(?:openTestExplorer|打开测试面板)/i,
+        regex: /openTestExplorer/i,
         handler: async () => { await d.openTestExplorer(); },
       },
       {
-        regex: /(?:waitForTestDiscovery|等待测试发现)\s+(.+?)(?:\s+(\d+)s)?$/i,
+        regex: /waitForTestDiscovery\s+(.+?)(?:\s+(\d+)s)?$/i,
         handler: async (m) => {
           const timeoutMs = m[2] ? parseInt(m[2], 10) * 1000 : 300_000;
           const found = await d.waitForTestDiscovery(m[1].trim(), timeoutMs);
@@ -247,88 +247,88 @@ export class ActionResolver {
         },
       },
       {
-        regex: /(?:runAllTests|运行全部测试)/i,
+        regex: /runAllTests/i,
         handler: async () => { await d.runAllTests(); },
       },
       {
-        regex: /(?:runTestsWithProfile|使用配置运行测试)\s+(.+)/i,
+        regex: /runTestsWithProfile\s+(.+)/i,
         handler: async (m) => { await d.runTestsWithProfile(m[1].trim()); },
       },
       {
-        regex: /(?:clickCodeLens|点击CodeLens)\s+(.+)/i,
+        regex: /clickCodeLens\s+(.+)/i,
         handler: async (m) => { await d.clickCodeLens(m[1].trim()); },
       },
 
       // ── Hover ──
       {
-        regex: /(?:hoverOnText|悬停在)\s+(.+)/i,
+        regex: /hoverOnText\s+(.+)/i,
         handler: async (m) => { await d.hoverOnText(m[1].trim()); },
       },
       {
-        regex: /(?:dismissHover|关闭悬停)/i,
+        regex: /dismissHover/i,
         handler: async () => { await d.dismissHover(); },
       },
 
       // ── File Explorer ──
       {
-        regex: /(?:createNewFile|创建文件)\s+(\S+)\s+(\S+)/i,
+        regex: /createNewFile\s+(\S+)\s+(\S+)/i,
         handler: async (m) => { await d.createNewFileViaExplorer(m[1], m[2]); },
       },
 
       // ── Dependency tree ──
       {
-        regex: /(?:openDependencyExplorer|打开依赖视图)/i,
+        regex: /openDependencyExplorer/i,
         handler: async () => { await d.openDependencyExplorer(); },
       },
 
       // ── Quick Input ──
       {
-        regex: /(?:fillQuickInput|填写输入框)\s+([\s\S]+)/i,
+        regex: /fillQuickInput\s+([\s\S]+)/i,
         handler: async (m) => { await d.fillQuickInput(m[1].trim()); },
       },
       {
-        regex: /(?:fillAnyInput|填写任意输入框)\s+([\s\S]+)/i,
+        regex: /fillAnyInput\s+([\s\S]+)/i,
         handler: async (m) => { await d.fillAnyInput(m[1].trim()); },
       },
       {
-        regex: /(?:typeInQuickInput|在输入框中输入)\s+([\s\S]+)/i,
+        regex: /typeInQuickInput\s+([\s\S]+)/i,
         handler: async (m) => { await d.typeInQuickInput(m[1].trim()); },
       },
       {
-        regex: /(?:confirmQuickInput|确认输入)/i,
+        regex: /confirmQuickInput/i,
         handler: async () => { await d.confirmQuickInput(); },
       },
       {
-        regex: /(?:dismissQuickInput|取消输入)/i,
+        regex: /dismissQuickInput/i,
         handler: async () => { await d.dismissQuickInput(); },
       },
 
       // ── Dialog ──
       {
-        regex: /(?:waitForDialog|等待对话框)(?:\s+(\d+))?/i,
+        regex: /waitForDialog(?:\s+(\d+))?/i,
         handler: async (m) => {
           const timeout = m[1] ? parseInt(m[1], 10) * 1000 : 10_000;
           await d.waitForDialog(timeout);
         },
       },
       {
-        regex: /(?:clickDialogButton|点击对话框按钮)\s+(.+)/i,
+        regex: /clickDialogButton\s+(.+)/i,
         handler: async (m) => { await d.clickDialogButton(m[1].trim()); },
       },
       {
-        regex: /(?:tryClickDialogButton|尝试点击对话框按钮)\s+(.+)/i,
+        regex: /tryClickDialogButton\s+(.+)/i,
         handler: async (m) => { await d.tryClickDialogButton(m[1].trim()); },
       },
       {
-        regex: /(?:confirmDialog|确认对话框)/i,
+        regex: /confirmDialog/i,
         handler: async () => { await d.confirmDialog(); },
       },
       {
-        regex: /(?:tryClickButton|尝试点击按钮)\s+(.+)/i,
+        regex: /tryClickButton\s+(.+)/i,
         handler: async (m) => { await d.tryClickButton(m[1].trim()); },
       },
       {
-        regex: /(?:waitForDialog|等待对话框)\s*(?:(\d+)\s*(?:秒|seconds?|s))?/i,
+        regex: /waitForDialog\s*(?:(\d+)\s*(?:seconds?|s))?/i,
         handler: async (m) => {
           const timeoutMs = m[1] ? parseInt(m[1], 10) * 1000 : 10_000;
           await d.waitForDialog(timeoutMs);

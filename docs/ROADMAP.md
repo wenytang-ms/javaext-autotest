@@ -1,332 +1,328 @@
 # Roadmap — VSCode AutoTest
 
-## 总体目标
+## Overall goal
 
-让 Copilot CLI 直接读取 wiki 中的 Test Plan（Markdown），自动驱动 VSCode 执行端到端测试并验证结果。
-
----
-
-## Phase 1 ✅ 基础框架搭建
-
-> 状态：**已完成**
-
-- [x] 项目初始化（TypeScript + npm）
-- [x] VscodeDriver 核心 — Playwright Electron 启动/关闭
-- [x] 基础操作原语
-  - [x] `runCommandFromPalette()` — Command Palette 执行
-  - [x] `openFile()` — Quick Open 打开文件
-  - [x] `getEditorContent()` — 读取编辑器内容
-  - [x] `saveFile()` / `pressKeys()` — 保存与快捷键
-  - [x] `runInTerminal()` — 终端命令
-- [x] UI 交互原语
-  - [x] `activeSideTab()` — 侧边栏切换
-  - [x] `clickTreeItem()` / `isTreeItemVisible()` — TreeView 操作
-  - [x] `selectPaletteOption()` — Palette 选项选择
-  - [x] `getNotifications()` — 通知读取
-- [x] Snapshot 能力
-  - [x] `snapshot()` — A11y 树快照
-  - [x] `domSnapshot()` — DOM 快照
-  - [x] `screenshot()` — 截图
-- [x] 基础验证
-  - [x] `isElementVisible()` — 元素可见性
-  - [x] `fileExists()` / `fileContains()` — 文件验证
+Enable Copilot CLI and `autotest` to run VS Code extension E2E tests from declarative test plans, verify results, capture artifacts, and provide useful failure analysis.
 
 ---
 
-## Phase 2 ✅ Test Plan 引擎
+## Phase 1: Foundation
 
-> 状态：**已完成**
+> Status: **Done**
 
-- [x] YAML Test Plan 解析器（`planParser.ts`）
-- [x] Test Plan 验证（`validate` 命令）
-- [x] 测试执行引擎（`testRunner.ts`）
-  - [x] Setup 阶段 — 扩展加载、workspace 配置、settings 注入
-  - [x] Step 顺序执行 — action 匹配 → 执行 → 验证
-  - [x] 确定性验证 — `verifyFile` / `verifyNotification` / `verifyEditor`
-- [x] CLI 入口（`run` / `validate` 命令）
-- [x] JSON 报告输出
-- [x] 示例 Test Plan（API Center）
-
----
-
-## Phase 3 ✅ Java 扩展测试能力 + 端到端可跑
-
-> 状态：**已完成** · `java-maven.yaml` 8/8 通过
-
-- [x] Wiki Test Plan → YAML 转换
-  - [x] `java-basic-editing.yaml` — Basic 场景 (步骤 1-5)
-  - [x] `java-maven.yaml` — Maven 场景 (8 步全通过)
-- [x] 新增 Driver 操作原语（Java / Language Server 相关）
-  - [x] `typeInEditor()` — 编辑器文本输入（Monaco executeEdits API）
-  - [x] `setEditorContent()` / `selectAllInEditor()` — 编辑器内容替换
-  - [x] `typeAndTriggerSnippet()` — 代码片段触发
-  - [x] `waitForLanguageServer()` — 语言服务器就绪轮询
-  - [x] `getProblemsCount()` — Problems 面板错误/警告计数（aria-label + Panel fallback）
-  - [x] `navigateToError()` / `navigateToNextError()` — 错误导航
-  - [x] `applyCodeAction()` — Code Action 执行
-  - [x] `triggerCompletion()` / `dismissCompletion()` — 代码补全
-  - [x] `goToLine()` — Ctrl+G 行跳转
-  - [x] `goToEndOfLine()` — End 键
-  - [x] `insertLineInFile()` — 磁盘文件修改 + File: Revert 重载
-  - [x] `editorContains()` — Monaco model + 可见 DOM 双重检查
-- [x] 新增 Action 模式匹配（50+ 种）
-- [x] 新增验证类型
-  - [x] `verifyProblems` — 错误/警告数量（精确 / atLeast 模式 + 轮询等待）
-  - [x] `verifyCompletion` — 补全列表验证
-- [x] VSCode 1.115 兼容性修复
-  - [x] Command Palette 定位器 `.quick-input-box input`（替代 `role="combobox"`）
-  - [x] `fill(">" + label)` 保留命令模式前缀
-  - [x] `fill(":" + line)` 保留行跳转前缀
-- [x] 工作区隔离
-  - [x] 自动复制 workspace 到固定临时目录
-  - [x] 清理旧临时目录 + 重试删除机制
-- [x] 截图系统
-  - [x] 每步自动截图（before/after/error）
-  - [x] 通过步骤自动清除 before 截图
-  - [x] 每次运行清空截图目录
-- [x] 事件驱动等待（替代硬编码 `waitForTimeout`）
-  - [x] Quick Input widget visible/hidden
-  - [x] Suggest widget visible/hidden
-  - [x] Workbench ready
-  - [x] Tree item visible
-- [x] 进程生命周期管理
-  - [x] 每次启动清空 user-data 目录（防止窗口恢复）
-  - [x] Settings 注入 `window.restoreWindows: none`
-  - [x] SIGINT/SIGTERM 信号处理
-  - [x] `close()` 重试机制
-- [x] action 参数大小写保留（case-insensitive 匹配 + 原始文本提取）
-- [x] 路径解析相对于 test plan 文件目录
-- [x] Quick Open 重试机制（文件索引未就绪时自动重试）
+- [x] Project bootstrap with TypeScript and npm.
+- [x] VscodeDriver core: Playwright Electron launch and shutdown.
+- [x] Basic operation primitives:
+  - [x] `runCommandFromPalette()` for Command Palette execution.
+  - [x] `openFile()` for Quick Open.
+  - [x] `getEditorContent()` for editor content reads.
+  - [x] `saveFile()` / `pressKeys()` for saves and keyboard shortcuts.
+  - [x] `runInTerminal()` for terminal commands.
+- [x] UI interaction primitives:
+  - [x] `activeSideTab()` for side bar switching.
+  - [x] `clickTreeItem()` / `isTreeItemVisible()` for TreeView operations.
+  - [x] `selectPaletteOption()` for palette option selection.
+  - [x] `getNotifications()` for notification reads.
+- [x] Snapshot capabilities:
+  - [x] `snapshot()` for accessibility tree snapshots.
+  - [x] `domSnapshot()` for DOM snapshots.
+  - [x] `screenshot()` for screenshot capture.
+- [x] Basic verification:
+  - [x] `isElementVisible()` for element visibility.
+  - [x] `fileExists()` / `fileContains()` for file checks.
 
 ---
 
-## Phase 4 ✅ 架构解耦 + AI 验证层 + Copilot CLI 集成
+## Phase 2: Test plan engine
 
-> 状态：**已完成**
+> Status: **Done**
 
-### 4a. 架构解耦
-
-TestRunner God Class 拆分为独立模块：
-
-- [x] `ActionResolver` — 自然语言 action → Driver 调用（50+ 种 regex 模式，未匹配时回退到 Command Palette）
-- [x] `StepVerifier` — 10+ 种确定性验证（file/editor/problems/completion/notification/quick input/dialog/tree item/editor tab/output channel/terminal）
-- [x] `LLMClient` — Azure OpenAI 客户端封装
-- [x] `TestRunner` — 瘦编排层（启动 → 执行 → 截图 → 报告）
-
-### 4b. LLM 失败截图分析
-
-- [x] Azure OpenAI 集成（before/after screenshot base64 → reasoning + suggestion）
-- [x] 环境变量配置（`AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT`）
-- [x] 未配置时自动跳过（不阻塞测试）
-- [x] `--no-llm` CLI 选项强制跳过
-- [x] 确定性验证决定 pass/fail，LLM 仅在失败后基于 `verify` 自然语言字段和 before/after 截图做分析建议
-
-### 4c. Copilot CLI 集成
-
-- [x] `AGENTS.md` — 项目级指南（CLI 选项、test plan 列表、截图分析）
-- [x] 根目录 `AGENTS.md` — 入口指引
-
-### 待做（AI 增强）
-
-- [ ] AI Action 映射（fallback）— 无匹配 regex 时让 AI 规划 Driver 调用
-- [ ] 操作词典扩展 — 从历史记录学习 action → driver 映射
+- [x] YAML test plan parser (`planParser.ts`).
+- [x] Test plan validation (`validate` command).
+- [x] Test execution engine (`testRunner.ts`):
+  - [x] Setup phase: extension loading, workspace configuration, settings injection.
+  - [x] Sequential step execution: action matching → execution → verification.
+  - [x] Deterministic verification: `verifyFile`, `verifyNotification`, `verifyEditor`.
+- [x] CLI entry points (`run` / `validate`).
+- [x] JSON report output.
+- [x] Example test plan.
 
 ---
 
-## Phase 5 🔲 Markdown Test Plan 原生支持
+## Phase 3: Java extension testing capability
 
-> 状态：**待开始** · 优先级：高
+> Status: **Done**
 
-让 Copilot CLI / autotest 直接读取 wiki Markdown 格式的 Test Plan，无需手动转 YAML。
-
-- [ ] Markdown Test Plan 解析器
-  - [ ] 解析 `## Scenario` 标题提取场景
-  - [ ] 解析有序列表 `1. 2. 3.` 提取步骤
-  - [ ] 识别内嵌代码块作为输入数据
-  - [ ] 识别 "check" / "verify" / "should" 等关键词提取验证条件
-- [ ] 结构化标注方案（可选增强）
-  - [ ] 支持 HTML 注释 `<!-- autotest:action ... -->` 嵌入
-  - [ ] 保持 Markdown 人可读性
-- [ ] Copilot CLI 编排入口
-  - [ ] `copilot-test run --wiki-plan Test-Plan.md --scenario "Basic"`
-  - [ ] 自动提取指定场景 → 转换为内部 TestPlan 对象 → 执行
-- [x] Wiki Test Plan 全场景覆盖 (15/16)
-  - [x] Basic #1-5 — `java-basic-editing.yaml` ✅ 8/8
-  - [x] Basic #6-8 — 已合并到 `java-basic-editing.yaml`
-  - [x] Basic #9 (New Java File) — `java-new-file-snippet.yaml` ✅ 4/4
-  - [x] Maven — `java-maven.yaml` ✅ 8/8
-  - [x] Maven Multimodule — `java-maven-multimodule.yaml` ✅ 5/5
-  - [x] Gradle — `java-gradle.yaml` ✅ 7/7
-  - [x] Maven Java 25 — `java-maven-java25.yaml` ✅ 6/6
-  - [x] Gradle Java 25 — `java-gradle-java25.yaml` ✅ 6/6
-  - [x] Single file — `java-single-file.yaml` ✅ 6/6
-- [x] Single file without workspace — `java-single-no-workspace.yaml` ✅ 6/6
-  - [x] Fresh import — `java-fresh-import.yaml`（需要提前 clone spring-petclinic）
-  - [x] Debugger for Java — `java-debugger.yaml` ✅ 6/6
-  - [x] Java Test Runner — `java-test-runner.yaml` ✅ 6/6
-  - [x] Maven for Java — `java-maven-resolve-type.yaml` ✅ 10/10
-  - [x] Java Dependency Viewer — `java-dependency-viewer.yaml` ✅ 4/4
-  - [x] Java Extension Pack — `java-extension-pack.yaml` ✅ 3/3
-
----
-
-## Phase 6 🔲 运行环境与 CI 集成
-
-> 状态：**待开始** · 优先级：中
-
-- [ ] Attach 模式 — 连接已运行的 VSCode（CDP 端口）
-- [ ] 项目自动准备
-  - [ ] 自动 clone GitHub 测试项目
-  - [ ] JDK 版本检测与切换
-- [ ] CI/CD 集成
-  - [ ] GitHub Actions workflow 模板
-  - [ ] 测试结果上传为 artifact
-  - [ ] HTML 报告生成
-- [ ] 并行执行 — 多个 scenario 并行跑
+- [x] Wiki test plan scenarios converted to YAML.
+- [x] Java / language-server Driver primitives:
+  - [x] `typeInEditor()` for editor text input through Monaco / smoke-test APIs.
+  - [x] `setEditorContent()` / `selectAllInEditor()` for editor replacement.
+  - [x] `typeAndTriggerSnippet()` for snippet triggering.
+  - [x] `waitForLanguageServer()` for language-server readiness polling.
+  - [x] `getProblemsCount()` for Problems error/warning counts.
+  - [x] `navigateToError()` / `navigateToNextError()` for diagnostic navigation.
+  - [x] `applyCodeAction()` for Code Action execution.
+  - [x] `triggerCompletion()` / `dismissCompletion()` for completion.
+  - [x] `goToLine()` for Ctrl+G line navigation.
+  - [x] `goToEndOfLine()` for end-of-line navigation.
+  - [x] `insertLineInFile()` for disk writes followed by `File: Revert`.
+  - [x] `editorContains()` for editor content checks.
+- [x] 50+ action regex patterns.
+- [x] Additional verification types:
+  - [x] `verifyProblems` for exact / at-least problem counts with polling.
+  - [x] `verifyCompletion` for completion list checks.
+- [x] VS Code 1.115 compatibility fixes:
+  - [x] Command Palette locator `.quick-input-box input`.
+  - [x] Preserve the `>` command-mode prefix.
+  - [x] Preserve the `:` line-navigation prefix.
+- [x] Workspace isolation:
+  - [x] Copy workspaces to a temporary location.
+  - [x] Clean stale temporary directories with retry logic.
+- [x] Screenshot system:
+  - [x] Capture before/after/error screenshots per step.
+  - [x] Clear stale output for every run.
+- [x] Event-driven waits:
+  - [x] Quick Input visible/hidden.
+  - [x] Suggest widget visible/hidden.
+  - [x] Workbench readiness.
+  - [x] Tree item visibility.
+- [x] Process lifecycle management:
+  - [x] Clear user-data directory before launch.
+  - [x] Inject `window.restoreWindows: none`.
+  - [x] Handle SIGINT/SIGTERM.
+  - [x] Retry `close()`.
+- [x] Preserve action argument casing with case-insensitive matching.
+- [x] Resolve paths relative to the test plan file.
+- [x] Retry Quick Open while file indexing is still settling.
 
 ---
 
-## Phase 7 ✅ 新增 Driver 能力
+## Phase 4: Architecture split, LLM analysis, and Copilot CLI integration
 
-> 状态：**已完成**
+> Status: **Done**
 
-已实现除 Webview 外的大部分 Driver 能力（70+ 个 Driver 方法 + 50+ 个 Action 模式），覆盖文件、编辑器、TreeView、Quick Input/Dialog、代码智能、Debug、Test Runner、终端和 Output channel。
+### 4a. Architecture split
 
-### 调试（Debugger for Java）
+The former TestRunner god class was split into focused modules:
 
-| 能力 | 说明 | Playwright 可行性 |
-|------|------|-------------------|
-| `startDebugSession(config)` | 通过 Command Palette 启动调试 | ✅ 可行 — F5 或 `Debug: Start Debugging` 命令 |
-| `setBreakpoint(file, line)` | 在指定行设置断点 | ✅ 可行 — `goToLine()` + 点击行号区域（gutter）或 `Debug: Toggle Breakpoint` 命令 |
-| `waitForBreakpointHit()` | 等待断点命中 | ✅ 已实现 — 轮询调试暂停状态 |
-| `getDebugVariables()` | 读取变量面板内容 | ✅ 已实现 — 读取变量面板 name/value |
-| `debugStepOver/Into/Out()` | 调试单步操作 | ✅ 可行 — 调试工具栏按钮或 F10/F11/Shift+F11 |
-| `getDebugConsoleOutput()` | 读取 Debug Console 输出 | ✅ 已实现 — 从 Debug Console / panel 文本读取 |
-| `stopDebugSession()` | 停止调试 | ✅ 可行 — Shift+F5 或工具栏按钮 |
+- [x] `ActionResolver`: action string → Driver call mapping through 50+ regex patterns, with Command Palette fallback.
+- [x] `StepVerifier`: 10+ deterministic checks covering file, editor, problems, completion, notifications, Quick Input, dialogs, tree items, editor tabs, output channels, and terminals.
+- [x] `LLMClient`: Azure OpenAI client wrapper.
+- [x] `TestRunner`: thin orchestration layer for launch → execute → screenshot → report.
 
-### 测试运行器（Java Test Runner）
+### 4b. LLM failure screenshot analysis
 
-| 能力 | 说明 | Playwright 可行性 |
-|------|------|-------------------|
-| `openTestExplorer()` | 打开测试资源管理器 | ✅ 可行 — `Testing: Focus on Test Explorer View` 命令 |
-| `runAllTests()` | 运行所有测试 | ✅ 可行 — 测试面板 `Run All` 按钮或 `Test: Run All Tests` 命令 |
-| `getTestResults()` | 获取测试结果（pass/fail 计数） | ✅ 已实现 — 从 Test Explorer 文本/状态读取 |
-| `clickCodeLens(label)` | 点击 CodeLens（如 "Run Test"） | ✅ 已实现 — 通过 label 定位并点击 |
-| `waitForTestComplete()` | 等待测试运行完成 | ✅ 可行 — 轮询测试进度条或状态变化 |
+- [x] Azure OpenAI integration: before/after screenshot base64 → reasoning + suggestion.
+- [x] Environment-variable configuration: `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT`.
+- [x] Auto-skip when not configured.
+- [x] `--no-llm` option to force-disable analysis.
+- [x] Deterministic verification decides pass/fail; LLM analysis only runs after failures and uses `verify` plus before/after screenshots as context.
 
-### Hover 与上下文交互（Maven for Java）
+### 4c. Copilot CLI integration
 
-| 能力 | 说明 | Playwright 可行性 |
-|------|------|-------------------|
-| `hoverOnSymbol(text)` | 在代码符号上悬停 | ✅ 可行 — `page.locator().hover()` 可触发 hover provider |
-| `getHoverContent()` | 读取 hover 弹窗内容 | ✅ 可行 — `.monaco-hover-content` 的 `textContent()` |
-| `clickHoverAction(label)` | 点击 hover 中的操作链接 | ✅ 可行 — hover 弹窗内的 `<a>` 元素 |
-| `followQuickPick(steps)` | 跟随多步 Quick Pick 交互 | ✅ 可行 — 已有 `selectPaletteOption()` |
+- [x] `AGENTS.md` project guide with CLI options, test plan guidance, and screenshot-analysis notes.
+- [x] Root `AGENTS.md` as the agent entry point.
 
-### 文件资源管理器交互
+### AI enhancement backlog
 
-| 能力 | 说明 | Playwright 可行性 |
-|------|------|-------------------|
-| `rightClickTreeItem(name)` | 右键点击文件树节点 | ✅ 可行 — `page.click({ button: 'right' })` |
-| `selectContextMenuItem(label)` | 选择右键菜单项 | ✅ 可行 — `.context-view .action-label` 定位 |
-| `createNewFile(name)` | 通过资源管理器创建文件 | ✅ 可行 — 右键菜单 "New File" → 输入文件名 |
+- [ ] AI action mapping fallback: let AI plan Driver calls for unmatched actions.
+- [ ] Expand the action dictionary from historical action → Driver mappings.
 
-### 依赖树（Java Dependency Viewer）
+---
 
-| 能力 | 说明 | Playwright 可行性 |
-|------|------|-------------------|
-| `openDependencyExplorer()` | 打开 Java 依赖视图 | ✅ 可行 — 侧边栏切换（已有 `activeSideTab()`） |
-| `expandTreeNode(path)` | 展开多层树节点 | ✅ 可行 — 已有 `clickTreeItem()`，可连续调用 |
-| `verifyTreeNodeExists(path)` | 验证节点存在 | ✅ 可行 — 已有 `isTreeItemVisible()` |
+## Phase 5: Native Markdown test plan support
 
-### Webview 交互（Java Extension Pack）
+> Status: **Not started** · Priority: High
 
-| 能力 | 说明 | Playwright 可行性 |
-|------|------|-------------------|
-| `switchToWebview()` | 切换到 webview iframe | ⚠️ 较复杂 — 需要 `page.frameLocator()` 进入 iframe |
-| `interactWithWebview(selector)` | 在 webview 内操作 | ⚠️ 较复杂 — webview 内容在独立 iframe 中，需要先定位 frame |
-| `getWebviewContent()` | 读取 webview 内容 | ⚠️ 较复杂 — 同上 |
+Allow Copilot CLI / `autotest` to read wiki Markdown test plans directly without manual YAML conversion.
 
-### 可行性总结
+- [ ] Markdown test plan parser:
+  - [ ] Parse `## Scenario` headings.
+  - [ ] Parse ordered lists (`1.`, `2.`, `3.`) into steps.
+  - [ ] Recognize inline code blocks as input data.
+  - [ ] Recognize words such as "check", "verify", and "should" as verification hints.
+- [ ] Structured annotation scheme:
+  - [ ] Support HTML comments such as `<!-- autotest:action ... -->`.
+  - [ ] Keep Markdown human-readable.
+- [ ] Copilot CLI orchestration entry point:
+  - [ ] `copilot-test run --wiki-plan Test-Plan.md --scenario "Basic"`.
+  - [ ] Extract a scenario, convert it to an internal TestPlan object, and execute it.
+- [x] Wiki test plan coverage:
+  - [x] Basic #1-5: `java-basic-editing.yaml`.
+  - [x] Basic #6-8: merged into `java-basic-editing.yaml`.
+  - [x] Basic #9 (New Java File): `java-new-file-snippet.yaml`.
+  - [x] Maven: `java-maven.yaml`.
+  - [x] Maven Multimodule: `java-maven-multimodule.yaml`.
+  - [x] Gradle: `java-gradle.yaml`.
+  - [x] Maven Java 25: `java-maven-java25.yaml`.
+  - [x] Gradle Java 25: `java-gradle-java25.yaml`.
+  - [x] Single file: `java-single-file.yaml`.
+  - [x] Single file without workspace: `java-single-no-workspace.yaml`.
+  - [x] Fresh import: `java-fresh-import.yaml` (requires Spring Petclinic to be cloned first).
+  - [x] Debugger for Java: `java-debugger.yaml`.
+  - [x] Java Test Runner: `java-test-runner.yaml`.
+  - [x] Maven for Java: `java-maven-resolve-type.yaml`.
+  - [x] Java Dependency Viewer: `java-dependency-viewer.yaml`.
+  - [x] Java Extension Pack: `java-extension-pack.yaml`.
 
-| 类别 | 需要的能力数 | ✅ 可行 | ⚠️ 部分/复杂 |
-|------|------------|---------|-------------|
-| 调试 | 7 | 7 | 0 |
-| 测试运行器 | 5 | 5 | 0 |
-| Hover/上下文 | 4 | 4 | 0 |
-| 文件资源管理器 | 3 | 3 | 0 |
-| 依赖树 | 3 | 3 | 0 |
+---
+
+## Phase 6: Runtime environment and CI integration
+
+> Status: **Not started** · Priority: Medium
+
+- [ ] Attach mode: connect to an existing VS Code instance over CDP.
+- [ ] Automatic project preparation:
+  - [ ] Clone GitHub test projects.
+  - [ ] Detect and switch JDK versions.
+- [ ] CI/CD integration:
+  - [ ] GitHub Actions workflow template.
+  - [ ] Upload test results as artifacts.
+  - [ ] HTML report generation.
+- [ ] Parallel execution for multiple scenarios.
+
+---
+
+## Phase 7: Driver capability expansion
+
+> Status: **Done**
+
+Most non-Webview Driver capabilities are implemented: 70+ Driver methods and 50+ action patterns covering files, editor, TreeView, Quick Input/Dialog, code intelligence, Debug, Test Runner, terminal, and output channels.
+
+### Debugger for Java
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| `startDebugSession(config)` | Start debugging through Command Palette / F5 | Implemented |
+| `setBreakpoint(file, line)` | Set a breakpoint at a line | Implemented |
+| `waitForBreakpointHit()` | Wait for debugger pause state | Implemented |
+| `getDebugVariables()` | Read Variables panel name/value pairs | Implemented |
+| `debugStepOver/Into/Out()` | Debug stepping | Implemented |
+| `getDebugConsoleOutput()` | Read Debug Console / panel text | Implemented |
+| `stopDebugSession()` | Stop debugging | Implemented |
+
+### Java Test Runner
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| `openTestExplorer()` | Open Test Explorer | Implemented |
+| `runAllTests()` | Run all tests | Implemented |
+| `getTestResults()` | Get pass/fail/total counts | Implemented |
+| `clickCodeLens(label)` | Click a CodeLens action such as "Run Test" | Implemented |
+| `waitForTestComplete()` | Wait for test execution to finish | Implemented |
+
+### Hover and context interactions
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| `hoverOnSymbol(text)` | Hover on a source symbol | Implemented |
+| `getHoverContent()` | Read hover popup content | Implemented |
+| `clickHoverAction(label)` | Click an action link in a hover popup | Implemented |
+| `followQuickPick(steps)` | Follow multi-step Quick Pick flows | Covered by palette-selection primitives |
+
+### File Explorer interactions
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| `rightClickTreeItem(name)` | Right-click a file tree item | Implemented through context-menu primitives |
+| `selectContextMenuItem(label)` | Select a context menu item | Implemented |
+| `createNewFile(name)` | Create a file through Explorer | Implemented |
+
+### Java Dependency Viewer
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| `openDependencyExplorer()` | Open Java Dependencies view | Implemented |
+| `expandTreeNode(path)` | Expand nested tree nodes | Implemented through repeated tree expansion |
+| `verifyTreeNodeExists(path)` | Verify node existence | Implemented through tree item verification |
+
+### Webview interactions
+
+| Capability | Description | Status |
+|------------|-------------|--------|
+| `switchToWebview()` | Enter a webview iframe | Complex; not generally implemented |
+| `interactWithWebview(selector)` | Operate inside a webview | Complex; requires frame-specific implementation |
+| `getWebviewContent()` | Read webview content | Complex; requires frame-specific implementation |
+
+### Feasibility summary
+
+| Category | Required capabilities | Supported | Partial/complex |
+|----------|-----------------------|-----------|-----------------|
+| Debugging | 7 | 7 | 0 |
+| Test Runner | 5 | 5 | 0 |
+| Hover/context | 4 | 4 | 0 |
+| File Explorer | 3 | 3 | 0 |
+| Dependency tree | 3 | 3 | 0 |
 | Webview | 3 | 0 | 3 |
 
-> **结论**：Playwright Electron 已覆盖绝大多数 Java 扩展 E2E 场景。Webview 交互仍最复杂（iframe 嵌套），
-> 需要按具体扩展页面继续补齐。
+> **Conclusion**: Playwright Electron covers most Java extension E2E scenarios. Webview interaction remains the hardest area because of iframe nesting and extension-specific DOM structures.
 
 ---
 
-## Phase 8 🔲 Test Plan 审计修复
+## Phase 8: Test plan audit fixes
 
-> 状态：**进行中** · 优先级：高
-> 
-> 详细审计报告见 [test-plan-audit.md](test-plan-audit.md)
+> Status: **In progress** · Priority: High
+>
+> See [test-plan-audit.md](test-plan-audit.md) for the detailed audit.
 
-### 框架层修复
+### Framework fixes
 
-- [x] `renameSymbol(newName)` — F2 重命名 Driver 方法
-- [x] `organizeImports()` — Shift+Alt+O Driver 方法
-- [x] 临时 workspace 路径问题 — **已用 git worktree 解决**，所有文件路径统一在 worktree 下，LS 不再混淆
-- [ ] Code Action 重复内容问题 — `typeAndTriggerSnippet` 在 tab 1 生成 class body，Code Action 在 tab 2 再次基于磁盘生成 `call()`，save-all 后两个 tab 合并导致 `Duplicate method`。需要更精细的 tab 管理（关闭旧 tab 后再触发 Code Action）
-- [ ] `getProblemsCount` 时序问题 — status bar 的 codicon textContent 有延迟更新，polling 可能读到旧值
+- [x] `renameSymbol(newName)`: F2 rename Driver method.
+- [x] `organizeImports()`: Shift+Alt+O Driver method.
+- [x] Temporary workspace path issue: solved with git worktrees so files, the language server, and the UI operate on the same workspace path.
+- [ ] Code Action duplicate content issue: `typeAndTriggerSnippet` can generate a class body in one tab while Code Action edits another tab, and Save All can merge stale state into a duplicate method. More precise tab management is needed.
+- [ ] `getProblemsCount` timing issue: status bar codicon text can update late, so polling may read a stale count.
 
-### Test Plan 修复 — 恢复真实 UI 操作（替代磁盘编辑绕过）
+### Test plan fixes: restore real UI operations
 
-- [x] Basic #3: class snippet — `typeAndTriggerSnippet class` 已验证可工作（截图确认）
-- [x] Basic #4: Code Action — `applyCodeAction` + `navigateToError` 可工作（截图确认 `call()` 已生成），但 save-all 后出现 Duplicate method 问题（见上）
-- [ ] Basic #7: Organize Imports — `organizeImports()` 命令可执行（需在 worktree 下验证）
-- [x] Basic #8: Rename Symbol — `renameSymbol` Driver 已实现（需 Foo.java 有内容才能运行）
-- [ ] Basic: 合并 basic-editing + basic-extended 为一个 test plan（共享 workspace 状态）
+- [x] Basic #3 class snippet: `typeAndTriggerSnippet class` works.
+- [x] Basic #4 Code Action: `applyCodeAction` + `navigateToError` works, with the duplicate-method caveat above.
+- [ ] Basic #7 Organize Imports: `organizeImports()` exists and needs continued validation in worktree mode.
+- [x] Basic #8 Rename Symbol: `renameSymbol` Driver exists and works when `Foo.java` has content.
+- [ ] Basic scenario: keep the combined Basic plan stable across shared workspace state.
 
-### Test Plan 修复 — 加强验证（替代 auto-pass）
+### Test plan fixes: strengthen deterministic verification
 
-- [ ] Debugger: 用 `waitForBreakpointHit()` 替代 `wait 5s`，验证断点真正命中
-- [ ] Test Runner: 用 `waitForTestComplete()` + `getTestResults()` 验证测试通过
-- [ ] Maven for Java: 添加 `verifyEditor` 检查 import 是否添加、`verifyFile` 检查 pom.xml
-- [ ] Dependency Viewer: 添加 `clickTreeItem` 验证 JDK Libraries / Maven Dependencies 节点
+- [ ] Debugger: replace `wait 5 seconds` with `waitForBreakpointHit()` and verify the breakpoint is actually hit.
+- [ ] Test Runner: use `waitForTestComplete()` + `getTestResults()` to verify test pass counts.
+- [ ] Maven for Java: add `verifyEditor` for imports and `verifyFile` for `pom.xml`.
+- [ ] Dependency Viewer: add tree item checks for JDK Libraries and Maven Dependencies.
 
-### 不修复（已知限制）
+### Known limitations
 
-- Basic #9: Explorer 右键 New File — snippet 需要 VSCode 新文件流程触发，磁盘创建无法模拟
-- Basic #5: Force Compilation — Quick Pick 在 0 errors 时不弹出，行为不一致
-- Extension Pack: Classpath 配置 — webview 内部交互不支持
-
----
-
-## Phase 9 🔲 稳定性与扩展
-
-> 状态：**待开始** · 优先级：低
-
-- [ ] 窗口焦点防干扰措施
-  - [ ] Headless 模式支持 — Linux 下通过 `xvfb-run` 运行
-  - [ ] Windows 虚拟桌面隔离
-  - [ ] 对 blur 敏感的组件增加重试逻辑
-- [ ] 重试机制 — 步骤失败自动重试（可配置次数）
-- [ ] 条件跳过 — 根据平台/JDK版本跳过步骤
-- [ ] 交互模式 (`--interactive`) — 逐步执行 + 手动确认
-- [ ] Test Plan 自动修复建议 — 失败后 AI 建议修改
-- [ ] 扩展到其他 VSCode 扩展（非 Java）
-- [ ] 单元测试覆盖（vitest）
+- Basic #9 Explorer New File: snippets require the VS Code new-file flow; direct disk creation cannot fully simulate that path.
+- Basic #5 Force Compilation: the Quick Pick may not appear when there are zero errors, so behavior is inconsistent.
+- Extension Pack Classpath configuration: webview internals are not generally supported.
 
 ---
 
-## 里程碑总览
+## Phase 9: Stability and extension
 
-| 里程碑 | 状态 | 关键交付 |
-|--------|------|---------|
-| M1: 框架可用 | ✅ 完成 | CLI + YAML Plan + Playwright Driver |
-| M2: Java POC | ✅ 完成 | wiki 转 YAML + Java 操作原语 |
-| M3: 端到端可跑 | ✅ 完成 | java-maven.yaml 8/8 通过 · 工作区隔离 · 截图 · 事件驱动等待 |
-| M4: AI 验证 + 解耦 | ✅ 完成 | ActionResolver / StepVerifier / LLMClient 拆分 · Azure OpenAI 集成 · Copilot CLI AGENTS.md |
-| M5: 读 wiki 跑测试 | 🔲 待做 | Copilot CLI 直接读 Markdown → 全自动测试 |
-| M6: CI 集成 | 🔲 待做 | GitHub Actions · HTML 报告 · 并行执行 |
-| M7: Driver 扩展 | ✅ 完成 | 调试 · 测试运行器 · Hover · 依赖树 · 文件管理器 · Rename · Organize Imports |
-| M8: Wiki 全覆盖 | ✅ 完成 | 16/16 场景 · 16 个 test plan · 93 步 |
-| M9: 审计修复 | 🔲 进行中 | 恢复真实 UI 操作 · 加强验证 · 修复临时 workspace 路径问题 |
+> Status: **Not started** · Priority: Low
+
+- [ ] Window-focus hardening:
+  - [ ] Headless mode via `xvfb-run` on Linux.
+  - [ ] Windows virtual desktop isolation.
+  - [ ] Extra retry logic for blur-sensitive components.
+- [ ] Step retry mechanism with configurable retry counts.
+- [ ] Conditional skips based on platform or JDK version.
+- [ ] Interactive mode (`--interactive`) for step-by-step manual confirmation.
+- [ ] Automatic test plan repair suggestions after failures.
+- [ ] Extend to non-Java VS Code extensions.
+- [ ] Unit test coverage with Vitest.
+
+---
+
+## Milestone overview
+
+| Milestone | Status | Key deliverables |
+|-----------|--------|------------------|
+| M1: Usable framework | Done | CLI + YAML plan + Playwright Driver |
+| M2: Java POC | Done | Wiki-to-YAML conversion + Java operation primitives |
+| M3: End-to-end runnable | Done | Java plan execution, workspace isolation, screenshots, event-driven waits |
+| M4: LLM analysis + architecture split | Done | ActionResolver / StepVerifier / LLMClient split, Azure OpenAI integration, Copilot CLI `AGENTS.md` |
+| M5: Run tests from wiki | Planned | Copilot CLI reads Markdown and runs fully automated tests |
+| M6: CI integration | Planned | GitHub Actions, HTML reports, parallel execution |
+| M7: Driver expansion | Done | Debugging, Test Runner, Hover, dependency tree, file explorer, Rename, Organize Imports |
+| M8: Wiki coverage | Done | 16/16 scenarios, 16+ test plans, 90+ steps |
+| M9: Audit fixes | In progress | Restore real UI operations, strengthen verification, harden workspace-path behavior |
