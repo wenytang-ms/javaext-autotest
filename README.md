@@ -108,6 +108,10 @@ steps:
 | `打开文件 XXX` / `open file XXX` | Quick Open 打开文件（含重试） | `打开文件 Foo.java` |
 | `点击侧边栏 XXX tab` | 切换侧边栏 Tab | `点击侧边栏 Explorer tab` |
 | `展开/点击 XXX 节点` | TreeView 操作 | `展开 APIs 节点` |
+| `expandTreeItem XXX` / `展开树节点 XXX` | 只展开已折叠的 TreeView 节点 | `expandTreeItem Lifecycle` |
+| `clickTreeItemAction <item> <label>` / `点击树节点按钮 <item> <label>` | 点击 TreeView 节点右侧 hover/inline action | `clickTreeItemAction compile Run` |
+| `collapseWorkspaceRoot` / `折叠工作区根节点` | 折叠 Explorer 中第一个展开的 workspace root，给其他 view 腾空间 | `collapseWorkspaceRoot` |
+| `collapseSidebarSection XXX` / `折叠侧边栏区域 XXX` | 折叠 Explorer 侧边栏区域 | `collapseSidebarSection OUTLINE` |
 | `选择 XXX 选项` | Palette 选项选择 | `选择 Full 选项` |
 | `等待 N 秒` / `wait N seconds` | 等待指定时间 | `等待 5 秒` |
 | `saveFile` / `保存文件` | Ctrl+S 保存 | `saveFile` |
@@ -131,6 +135,7 @@ steps:
 | `verifyEditor` | object | 编辑器内容（检查 Monaco model + 可见 DOM） |
 | `verifyProblems` | object | Problems 面板错误/警告计数（支持 `atLeast` 模式 + 轮询等待） |
 | `verifyCompletion` | object | 代码补全列表验证 |
+| `verifyTerminal` | object | 终端文本匹配，支持 `contains` / `notContains` |
 
 ---
 
@@ -179,6 +184,26 @@ export AZURE_OPENAI_DEPLOYMENT=gpt-4o        # 可选，默认 gpt-4o
 
 - 未配置时 `verify` 字段自动跳过，确定性验证不受影响
 - `--no-llm` 强制跳过 LLM 验证
+
+---
+
+## TreeView inline action 场景
+
+VS Code 的 TreeView inline action（例如节点右侧的 Run / Add / New 图标）通常只在 hover、focus 或 selected 时显示。不要用固定坐标点击图标，使用 `clickTreeItemAction <item> <label>`：
+
+```yaml
+- action: "expandTreeItem Lifecycle"
+- action: "clickTreeItemAction compile Run"
+```
+
+如果目标 view 被 Explorer、Outline、Timeline、Java Projects 等 section 挤到不可见，先折叠占空间的区域，再 focus 目标 view：
+
+```yaml
+- action: "collapseWorkspaceRoot"
+- action: "collapseSidebarSection OUTLINE"
+- action: "collapseSidebarSection TIMELINE"
+- action: "run command Maven: Focus on Maven Projects View"
+```
 
 ---
 

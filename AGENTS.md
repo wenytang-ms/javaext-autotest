@@ -33,7 +33,7 @@ YAML Test Plan → PlanParser → TestRunner → ActionResolver → VscodeDriver
 
 - **VscodeDriver** — Playwright Electron wrapper, launches VSCode via `@vscode/test-electron`
 - **ActionResolver** — Maps natural language actions to Driver methods via regex patterns
-- **StepVerifier** — Deterministic verification (file, editor, problems, completion, notification, tree item, editor tab, dialog)
+- **StepVerifier** — Deterministic verification (file, editor, problems, completion, notification, tree item, editor tab, dialog, output channel, terminal)
 - **LLMClient** — Azure OpenAI for post-failure screenshot analysis (optional)
 
 ## Test Plan YAML Structure
@@ -84,6 +84,9 @@ steps:
       visible: true
     verifyQuickInput:
       noError: true
+    verifyTerminal:
+      contains: "BUILD SUCCESS"
+      notContains: "BUILD FAILURE"
     timeout: 30              # step-level timeout (seconds)
     waitBefore: 5            # wait N seconds before executing
 ```
@@ -126,17 +129,19 @@ steps:
 | `selectCommand <Command Name>` | Open palette, type, click exact match (not Enter) |
 | `pressKey <key>` | Press a keyboard key (e.g. "Enter", "Escape") |
 | `click <name> tree item` | Single-click tree node (expands/collapses) |
+| `expandTreeItem <name>` | Expand a collapsed tree item by its twistie; no-op if already expanded |
 | `doubleClick <name> tree item` | Double-click to open file from Explorer |
 | `select <name> option` | Select from Quick Pick dropdown by name |
 | `selectOptionByIndex <n>` | Select from Quick Pick dropdown by index (0-based) |
 | `click side tab <name>` | Click a sidebar tab (e.g. "Explorer") |
 | `collapseSidebarSection <name>` | Collapse an Explorer sidebar section by header text |
+| `collapseWorkspaceRoot` | Collapse the first expanded workspace root in Explorer to free vertical space |
 | `wait <n> seconds` | Static wait |
 
 ### Tree Item Actions
 | Action | Description |
 |--------|-------------|
-| `clickTreeItemAction <item> <label>` | Click inline hover button on tree item (e.g. "New...") |
+| `clickTreeItemAction <item> <label>` | Click inline hover button on tree item (e.g. "Run", "New...") |
 | `contextMenu <item> <menuLabel>` | Right-click tree item → select context menu option |
 | `openDependencyExplorer` | Open the Java Dependencies view |
 | `createNewFile <folder> <name>` | Create file via Explorer right-click → New File |
@@ -306,7 +311,26 @@ When the Java Projects view is inside the Explorer sidebar, other sections (file
 - action: "run command Java Projects: Focus on Java Projects View"
 ```
 
-### 16. Tree Item Name Case Sensitivity
+For extension views that live in Explorer, collapse the workspace root itself instead of collapsing the whole Explorer section:
+
+```yaml
+- action: "collapseWorkspaceRoot"
+- action: "collapseSidebarSection OUTLINE"
+- action: "run command Maven: Focus on Maven Projects View"
+```
+
+### 16. TreeView Inline Actions
+
+TreeView inline actions are the buttons shown on the right side of a row, usually only after hover/focus/selection. Do not use hard-coded mouse coordinates for these buttons. Use `clickTreeItemAction <item> <label>` so the driver hovers the row, locates the visible action, and clicks it through Playwright mouse events:
+
+```yaml
+- action: "expandTreeItem Lifecycle"
+- action: "clickTreeItemAction compile Run"
+```
+
+Use `expandTreeItem` when you need idempotent expansion. Prefer `click <name> tree item` only when toggling is acceptable.
+
+### 17. Tree Item Name Case Sensitivity
 
 `getByRole("treeitem", { name })` is **case-insensitive**. If the Explorer has a folder called `INVISIBLE` and Java Projects has a node called `invisible`, they will both match. Be aware of this when working with projects whose names match sidebar section headers.
 
