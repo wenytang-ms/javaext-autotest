@@ -315,9 +315,17 @@ autotest/
 │   │   ├── vscodeDriver.ts    # VS Code lifecycle, workspace isolation, shared Driver state
 │   │   └── operations/         # Function-specific Driver operation mixins
 │   │       ├── commandOperations.ts
+│   │       ├── debugOperations.ts
+│   │       ├── dependencyOperations.ts
 │   │       ├── dialogOperations.ts
+│   │       ├── fileExplorerOperations.ts
 │   │       ├── hoverOperations.ts
-│   │       └── testRunnerOperations.ts
+│   │       ├── javaOperations.ts
+│   │       ├── quickInputOperations.ts
+│   │       ├── snapshotOperations.ts
+│   │       ├── testRunnerOperations.ts
+│   │       ├── treeOperations.ts
+│   │       └── verificationOperations.ts
 │   ├── operators/
 │   │   ├── actionResolver.ts   # Action → Driver calls (50+ regex)
 │   │   ├── stepVerifier.ts     # Deterministic verification (10+ strategies)

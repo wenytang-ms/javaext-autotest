@@ -52,9 +52,17 @@ src/
 │   ├── vscodeDriver.ts
 │   └── operations/
 │       ├── commandOperations.ts
+│       ├── debugOperations.ts
+│       ├── dependencyOperations.ts
 │       ├── dialogOperations.ts
+│       ├── fileExplorerOperations.ts
 │       ├── hoverOperations.ts
-│       └── testRunnerOperations.ts
+│       ├── javaOperations.ts
+│       ├── quickInputOperations.ts
+│       ├── snapshotOperations.ts
+│       ├── testRunnerOperations.ts
+│       ├── treeOperations.ts
+│       └── verificationOperations.ts
 ├── operators/
 │   ├── actionResolver.ts
 │   ├── llmClient.ts
@@ -108,16 +116,32 @@ Feature-specific Driver methods live in operation modules under `src/drivers/ope
 ```typescript
 export interface VscodeDriver
   extends CommandOperations,
+    DebugOperations,
+    DependencyOperations,
     DialogOperations,
+    FileExplorerOperations,
     HoverOperations,
-    TestRunnerOperations {}
+    JavaOperations,
+    QuickInputOperations,
+    SnapshotOperations,
+    TestRunnerOperations,
+    TreeOperations,
+    VerificationOperations {}
 
 Object.assign(
   VscodeDriver.prototype,
   commandOperations,
+  debugOperations,
+  dependencyOperations,
   dialogOperations,
+  fileExplorerOperations,
   hoverOperations,
+  javaOperations,
+  quickInputOperations,
+  snapshotOperations,
   testRunnerOperations,
+  treeOperations,
+  verificationOperations,
 );
 ```
 
