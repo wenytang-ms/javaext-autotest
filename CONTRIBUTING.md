@@ -22,11 +22,13 @@ npm test
 # Validate one plan
 npx autotest validate test-plans/java-maven.yaml
 
-# Validate all plans
-Get-ChildItem test-plans -Filter *.yaml | ForEach-Object { npx autotest validate $_.FullName }
-
 # Run one plan
 npx autotest run test-plans/java-maven.yaml
+```
+
+```powershell
+# Validate all plans
+Get-ChildItem test-plans -Filter *.yaml | ForEach-Object { npx autotest validate $_.FullName }
 ```
 
 ## Design principles
