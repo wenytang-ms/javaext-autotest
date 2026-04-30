@@ -303,6 +303,13 @@ Common options:
 
 ```text
 autotest/
+├── .github/
+│   ├── copilot-instructions.md  # Repository-wide Copilot instructions
+│   └── instructions/             # Scoped Copilot instruction files
+│       ├── action-dsl.instructions.md
+│       ├── driver-operations.instructions.md
+│       ├── test-plans.instructions.md
+│       └── verifiers.instructions.md
 ├── src/
 │   ├── drivers/
 │   │   ├── vscodeDriver.ts    # VS Code lifecycle, workspace isolation, shared Driver state
@@ -339,5 +346,6 @@ autotest/
 
 - [Architecture](docs/architecture.md)
 - [Contributing](CONTRIBUTING.md)
+- [Copilot instructions](.github/copilot-instructions.md)
 - [Implementation plan](docs/implementation-plan.md)
 - [Roadmap](docs/ROADMAP.md)
