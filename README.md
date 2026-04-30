@@ -305,7 +305,12 @@ Common options:
 autotest/
 ├── src/
 │   ├── drivers/
-│   │   └── vscodeDriver.ts    # Playwright VS Code operation primitives (70+ methods)
+│   │   ├── vscodeDriver.ts    # VS Code lifecycle, workspace isolation, shared Driver state
+│   │   └── operations/         # Function-specific Driver operation mixins
+│   │       ├── commandOperations.ts
+│   │       ├── dialogOperations.ts
+│   │       ├── hoverOperations.ts
+│   │       └── testRunnerOperations.ts
 │   ├── operators/
 │   │   ├── actionResolver.ts   # Action → Driver calls (50+ regex)
 │   │   ├── stepVerifier.ts     # Deterministic verification (10+ strategies)
@@ -322,6 +327,7 @@ autotest/
 │       ├── results.json
 │       └── screenshots/
 ├── AGENTS.md                    # Copilot CLI integration guide
+├── CONTRIBUTING.md              # Contributor workflow and design rules
 ├── docs/
 │   ├── architecture.md          # Architecture
 │   ├── implementation-plan.md   # Implementation plan
@@ -332,5 +338,6 @@ autotest/
 ## Related documents
 
 - [Architecture](docs/architecture.md)
+- [Contributing](CONTRIBUTING.md)
 - [Implementation plan](docs/implementation-plan.md)
 - [Roadmap](docs/ROADMAP.md)
