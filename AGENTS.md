@@ -87,6 +87,9 @@ steps:
     verifyTerminal:
       contains: "BUILD SUCCESS"
       notContains: "BUILD FAILURE"
+    verifyOutputChannel:
+      channel: "Maven for Java"
+      contains: "BUILD SUCCESS"
     timeout: 30              # step-level timeout (seconds)
     waitBefore: 5            # wait N seconds before executing
 ```
@@ -115,7 +118,8 @@ steps:
 | Action | Description |
 |--------|-------------|
 | `waitForLanguageServer` | Poll until LS shows "Ready" |
-| `triggerCompletionAt endOfMethod` | Move cursor + trigger IntelliSense |
+| `triggerCompletion` | Trigger IntelliSense completion |
+| `triggerCompletionAt <place>` | Alias that currently triggers IntelliSense at the current cursor position |
 | `applyCodeAction <label>` | Ctrl+. → click action by label (partial match) |
 | `organizeImports` | Shift+Alt+O |
 | `renameSymbol <newName>` | F2 rename |
@@ -127,7 +131,9 @@ steps:
 |--------|-------------|
 | `run command <Command Name>` | Execute via Command Palette (F1) |
 | `selectCommand <Command Name>` | Open palette, type, click exact match (not Enter) |
+| `executeVSCodeCommand <id> [jsonArg]` | Execute a VS Code command ID directly through the extension host |
 | `pressKey <key>` | Press a keyboard key (e.g. "Enter", "Escape") |
+| `pressTerminalKey <key>` | Focus terminal and press a key |
 | `click <name> tree item` | Single-click tree node (expands/collapses) |
 | `expandTreeItem <name>` | Expand a collapsed tree item by its twistie; no-op if already expanded |
 | `doubleClick <name> tree item` | Double-click to open file from Explorer |
@@ -343,8 +349,6 @@ Use `expandTreeItem` when you need idempotent expansion. Prefer `click <name> tr
 | `--override <kv...>` | Override setup fields (e.g. `--override extensionPath=../../vscode-java`) |
 | `--output <dir>` | Output directory (default: `./test-results/<plan-name>`) |
 | `--no-llm` | Skip LLM verification |
-| `--attach <port>` | Connect to existing VSCode via CDP port |
-| `--interactive` | Step-by-step execution with manual confirmation |
 
 ### `autotest run-all <dir>`
 | Option | Description |
@@ -366,8 +370,7 @@ test-results/<plan-name>/
     └── ...
 
 test-results/
-├── summary.md            # Aggregate results table (from run-all)
-└── summary.txt           # LLM analysis (if configured)
+└── summary.md            # Aggregate results table and optional LLM analysis
 ```
 
 ## LLM Configuration (Optional)
@@ -375,10 +378,10 @@ test-results/
 ```
 AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/
 AZURE_OPENAI_API_KEY=<key>
-AZURE_OPENAI_DEPLOYMENT=o4-mini
+AZURE_OPENAI_DEPLOYMENT=gpt-4.1
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
 ```
 
-- o4-mini: no `temperature` or `max_tokens` params — use `max_completion_tokens` only
 - LLM analyzes failed steps (before/after screenshot comparison) and generates aggregate summary
 - Not configured → all LLM features silently skipped
 

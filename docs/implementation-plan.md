@@ -35,7 +35,7 @@
 
 ### 2.3 终端操作
 - `runInTerminal()` — 在集成终端执行命令
-- `getTerminalOutput()` — 读取终端输出
+- `getTerminalText()` — 读取终端输出
 
 ---
 
@@ -50,29 +50,30 @@
 - `verifyFile` — 文件验证
 - `verifyNotification` — 通知验证
 - `verifyEditor` — 编辑器内容验证
-- `verifyElement` — 元素可见性验证
+- `verifyProblems` / `verifyCompletion` / `verifyQuickInput` / `verifyDialog`
+- `verifyTreeItem` / `verifyEditorTab` / `verifyOutputChannel` / `verifyTerminal`
 
 ### 3.3 结果报告
 - 每一步的 pass/fail + 原因
-- 失败时附带 snapshot 和截图
+- 失败时附带 before/after/error 截图
 - JSON 格式输出（可对接 CI）
 
 ---
 
-## Phase 4：AI 集成层
+## Phase 4：LLM 失败分析层
 
-### 4.1 Action 理解
-- 将自然语言 action 映射到 Driver 原语调用序列
-- 提供"操作词典"（常见操作的标准映射）
+### 4.1 ActionResolver
+- 将自然语言 action 映射到 Driver 原语调用
+- 提供 regex 操作词典；未匹配时回退到 Command Palette
 
-### 4.2 AI Snapshot 验证
-- 将 A11y snapshot 发送给 AI
-- AI 判断当前 UI 状态是否满足 `verify` 描述
-- 返回 pass/fail + reasoning
+### 4.2 Azure OpenAI 截图分析
+- 当确定性验证失败或步骤报错时，将 before/after 截图发送给 Azure OpenAI
+- 使用 `verify` 自然语言描述作为预期上下文
+- 返回 reasoning + suggestion；pass/fail 仍由确定性验证决定
 
-### 4.3 自适应执行
-- 当标准映射失败时，AI 读 snapshot 自行规划操作
-- 重试机制：操作失败后 AI 尝试替代方案
+### 4.3 汇总分析
+- `run-all` 和 `analyze` 可基于多个 `results.json` 生成 `summary.md`
+- 已配置 LLM 时为失败计划生成聚合分析
 
 ---
 
@@ -84,31 +85,17 @@
 autotest run test-plans/tree-view.yaml
 
 # 执行所有 test plans
-autotest run test-plans/
-
-# 连接已运行的 VSCode（调试模式）
-autotest run test-plans/tree-view.yaml --attach 9222
+autotest run-all test-plans
 
 # 仅验证 test plan 格式
 autotest validate test-plans/tree-view.yaml
 
-# 交互模式：逐步执行 + 手动确认
-autotest run test-plans/tree-view.yaml --interactive
+# 分析已有 test-results
+autotest analyze test-results
 ```
 
-### 5.2 配置文件
-```yaml
-# autotest.config.yaml
-vscode:
-  version: "insiders"
-  extensions:
-    - "./path/to/my-extension"
-  settings:
-    editor.fontSize: 14
-ai:
-  provider: "copilot"    # copilot | openai | azure-openai
-  model: "gpt-4"
-report:
-  format: "json"         # json | html | console
-  outputDir: "./test-results"
-```
+### 5.2 配置入口
+
+- Test plan 的 `setup` 字段负责 VS Code 版本、扩展、VSIX、workspace/file、settings、workspace trust、mock dialogs 等运行配置。
+- LLM 通过环境变量配置：`AZURE_OPENAI_ENDPOINT`、`AZURE_OPENAI_API_KEY`、`AZURE_OPENAI_DEPLOYMENT`、`AZURE_OPENAI_API_VERSION`。
+- 报告输出由 CLI `--output` 指定，目录内包含 `results.json`、`screenshots/` 和批量运行的 `summary.md`。

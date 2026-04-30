@@ -69,7 +69,7 @@
   - [x] `goToEndOfLine()` — End 键
   - [x] `insertLineInFile()` — 磁盘文件修改 + File: Revert 重载
   - [x] `editorContains()` — Monaco model + 可见 DOM 双重检查
-- [x] 新增 Action 模式匹配（16 种）
+- [x] 新增 Action 模式匹配（50+ 种）
 - [x] 新增验证类型
   - [x] `verifyProblems` — 错误/警告数量（精确 / atLeast 模式 + 轮询等待）
   - [x] `verifyCompletion` — 补全列表验证
@@ -108,18 +108,18 @@
 
 TestRunner God Class 拆分为独立模块：
 
-- [x] `ActionResolver` — 自然语言 action → Driver 调用（16 种 regex 模式）
-- [x] `StepVerifier` — 6 种确定性验证 + LLM 验证策略
+- [x] `ActionResolver` — 自然语言 action → Driver 调用（50+ 种 regex 模式，未匹配时回退到 Command Palette）
+- [x] `StepVerifier` — 10+ 种确定性验证（file/editor/problems/completion/notification/quick input/dialog/tree item/editor tab/output channel/terminal）
 - [x] `LLMClient` — Azure OpenAI 客户端封装
 - [x] `TestRunner` — 瘦编排层（启动 → 执行 → 截图 → 报告）
 
-### 4b. LLM 截图验证
+### 4b. LLM 失败截图分析
 
-- [x] Azure OpenAI GPT-4o 集成（screenshot base64 → pass/fail + reasoning + confidence）
+- [x] Azure OpenAI 集成（before/after screenshot base64 → reasoning + suggestion）
 - [x] 环境变量配置（`AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT`）
 - [x] 未配置时自动跳过（不阻塞测试）
 - [x] `--no-llm` CLI 选项强制跳过
-- [x] 确定性验证优先执行，LLM 仅处理 `verify` 自然语言字段
+- [x] 确定性验证决定 pass/fail，LLM 仅在失败后基于 `verify` 自然语言字段和 before/after 截图做分析建议
 
 ### 4c. Copilot CLI 集成
 
@@ -152,7 +152,7 @@ TestRunner God Class 拆分为独立模块：
   - [ ] 自动提取指定场景 → 转换为内部 TestPlan 对象 → 执行
 - [x] Wiki Test Plan 全场景覆盖 (15/16)
   - [x] Basic #1-5 — `java-basic-editing.yaml` ✅ 8/8
-  - [x] Basic #6-8 — `java-basic-extended.yaml` ✅ 8/8
+  - [x] Basic #6-8 — 已合并到 `java-basic-editing.yaml`
   - [x] Basic #9 (New Java File) — `java-new-file-snippet.yaml` ✅ 4/4
   - [x] Maven — `java-maven.yaml` ✅ 8/8
   - [x] Maven Multimodule — `java-maven-multimodule.yaml` ✅ 5/5
@@ -160,7 +160,7 @@ TestRunner God Class 拆分为独立模块：
   - [x] Maven Java 25 — `java-maven-java25.yaml` ✅ 6/6
   - [x] Gradle Java 25 — `java-gradle-java25.yaml` ✅ 6/6
   - [x] Single file — `java-single-file.yaml` ✅ 6/6
-  - [ ] Single file without workspace — 需要拖拽文件（Playwright 不支持）
+- [x] Single file without workspace — `java-single-no-workspace.yaml` ✅ 6/6
   - [x] Fresh import — `java-fresh-import.yaml`（需要提前 clone spring-petclinic）
   - [x] Debugger for Java — `java-debugger.yaml` ✅ 6/6
   - [x] Java Test Runner — `java-test-runner.yaml` ✅ 6/6
@@ -190,7 +190,7 @@ TestRunner God Class 拆分为独立模块：
 
 > 状态：**已完成**
 
-已实现除 Webview 外的全部 Driver 能力（22 个方法 + 15 个 Action 模式）。
+已实现除 Webview 外的大部分 Driver 能力（70+ 个 Driver 方法 + 50+ 个 Action 模式），覆盖文件、编辑器、TreeView、Quick Input/Dialog、代码智能、Debug、Test Runner、终端和 Output channel。
 
 ### 调试（Debugger for Java）
 
@@ -198,10 +198,10 @@ TestRunner God Class 拆分为独立模块：
 |------|------|-------------------|
 | `startDebugSession(config)` | 通过 Command Palette 启动调试 | ✅ 可行 — F5 或 `Debug: Start Debugging` 命令 |
 | `setBreakpoint(file, line)` | 在指定行设置断点 | ✅ 可行 — `goToLine()` + 点击行号区域（gutter）或 `Debug: Toggle Breakpoint` 命令 |
-| `waitForBreakpointHit()` | 等待断点命中 | ✅ 可行 — 轮询调试工具栏可见性或 status bar "Paused on breakpoint" |
-| `getDebugVariables()` | 读取变量面板内容 | ⚠️ 部分 — TreeView 操作已有，但变量值需要展开节点读取 |
+| `waitForBreakpointHit()` | 等待断点命中 | ✅ 已实现 — 轮询调试暂停状态 |
+| `getDebugVariables()` | 读取变量面板内容 | ✅ 已实现 — 读取变量面板 name/value |
 | `debugStepOver/Into/Out()` | 调试单步操作 | ✅ 可行 — 调试工具栏按钮或 F10/F11/Shift+F11 |
-| `getDebugConsoleOutput()` | 读取 Debug Console 输出 | ⚠️ 部分 — 需要定位 `.repl` 面板读取文本 |
+| `getDebugConsoleOutput()` | 读取 Debug Console 输出 | ✅ 已实现 — 从 Debug Console / panel 文本读取 |
 | `stopDebugSession()` | 停止调试 | ✅ 可行 — Shift+F5 或工具栏按钮 |
 
 ### 测试运行器（Java Test Runner）
@@ -210,8 +210,8 @@ TestRunner God Class 拆分为独立模块：
 |------|------|-------------------|
 | `openTestExplorer()` | 打开测试资源管理器 | ✅ 可行 — `Testing: Focus on Test Explorer View` 命令 |
 | `runAllTests()` | 运行所有测试 | ✅ 可行 — 测试面板 `Run All` 按钮或 `Test: Run All Tests` 命令 |
-| `getTestResults()` | 获取测试结果（pass/fail 计数） | ⚠️ 部分 — 需要从测试面板 TreeView 读取图标状态 |
-| `clickCodeLens(label)` | 点击 CodeLens（如 "Run Test"） | ⚠️ 部分 — CodeLens 是 `<a>` 元素，可通过 `getByText("Run Test")` 定位，但位置依赖行号 |
+| `getTestResults()` | 获取测试结果（pass/fail 计数） | ✅ 已实现 — 从 Test Explorer 文本/状态读取 |
+| `clickCodeLens(label)` | 点击 CodeLens（如 "Run Test"） | ✅ 已实现 — 通过 label 定位并点击 |
 | `waitForTestComplete()` | 等待测试运行完成 | ✅ 可行 — 轮询测试进度条或状态变化 |
 
 ### Hover 与上下文交互（Maven for Java）
@@ -251,16 +251,15 @@ TestRunner God Class 拆分为独立模块：
 
 | 类别 | 需要的能力数 | ✅ 可行 | ⚠️ 部分/复杂 |
 |------|------------|---------|-------------|
-| 调试 | 7 | 5 | 2 |
-| 测试运行器 | 5 | 3 | 2 |
+| 调试 | 7 | 7 | 0 |
+| 测试运行器 | 5 | 5 | 0 |
 | Hover/上下文 | 4 | 4 | 0 |
 | 文件资源管理器 | 3 | 3 | 0 |
 | 依赖树 | 3 | 3 | 0 |
 | Webview | 3 | 0 | 3 |
 
-> **结论**：Playwright Electron 可以支持绝大多数能力。Webview 交互最复杂（iframe 嵌套），
-> 调试和测试运行器的结果读取需要定制 DOM 解析。建议实现优先级：
-> Hover/上下文 > 文件资源管理器 > 依赖树 > 调试 > 测试运行器 > Webview。
+> **结论**：Playwright Electron 已覆盖绝大多数 Java 扩展 E2E 场景。Webview 交互仍最复杂（iframe 嵌套），
+> 需要按具体扩展页面继续补齐。
 
 ---
 

@@ -4,7 +4,7 @@
 
 一个 **AI 驱动的 VSCode 扩展 E2E 测试工具**。  
 用户只需提供结构化的 Test Plan（YAML），框架自动启动 VSCode、执行操作、验证结果。  
-核心理念：**不写死测试脚本，而是让 AI 根据 Snapshot 动态决策。**
+核心理念：**用声明式 Test Plan 驱动稳定的 VSCode 操作原语，优先确定性执行和验证，AI 仅作为失败截图分析的辅助层。**
 
 ---
 
@@ -18,9 +18,9 @@
                    │
                    ▼
 ┌──────────────────────────────────────────────────────────┐
-│                   AI Test Runner                         │
-│  读取 Plan → 逐步解释 → 决策下一步操作 → 验证结果       │
-│  循环: snapshot → 决策 → 执行 → snapshot → 验证          │
+│                    TestRunner                            │
+│  读取 Plan → ActionResolver → Driver → StepVerifier      │
+│  执行前/后截图 → results.json / summary.md → LLM 失败分析 │
 └──────────────────┬───────────────────────────────────────┘
                    │
                    ▼
@@ -47,9 +47,9 @@
 |--------|------|--------|------|---------|
 | 🟢 1 | VSCode Command ID | 极高 | `editor.action.formatDocument` | 所有有命令的操作 |
 | 🟡 2 | Accessibility Role + Name | 高 | `getByRole('treeitem', {name: 'API Center'})` | TreeView、Tab、按钮等 |
-| 🟠 3 | AI 读 Snapshot 动态决策 | 灵活 | AI 看到 `[button "Submit"]` 自己找 | 插件自定义 UI、未知界面 |
+| 🟠 3 | 截图 / A11y Snapshot 辅助分析 | 灵活 | 失败后对比 before/after 截图 | 插件自定义 UI、未知界面 |
 
-**设计原则：优先用命令绕过 UI → 其次用 A11y Role → 最后让 AI 看 snapshot 自己判断。**
+**设计原则：优先用命令绕过 UI → 其次用 A11y Role → 最后用截图和 snapshot 辅助定位失败原因。**
 
 ---
 
@@ -105,9 +105,9 @@ async dismissNotification(text: string): Promise<void>
 async getStatusBarText(): Promise<string>
 ```
 
-### 4.3 AI 动态操作（基于 Snapshot）
+### 4.3 Snapshot 与通用 UI 原语
 
-当上面两种方式不够用时，AI 读取 Accessibility 快照自行决策：
+当上面两种方式不够用时，Driver 仍提供截图、Accessibility 快照和通用定位原语，供调试、失败分析或后续扩展使用：
 
 ```typescript
 // 获取当前 UI 的结构化描述（A11y 树）
@@ -119,7 +119,7 @@ async domSnapshot(): Promise<string>
 // 截图（视觉验证）
 async screenshot(path?: string): Promise<Buffer>
 
-// 通用点击（AI 根据 snapshot 决定 locator）
+// 通用点击
 async clickByRole(role: string, name: string): Promise<void>
 async clickByText(text: string): Promise<void>
 ```
@@ -201,45 +201,48 @@ steps:
 | `verifyFile` | 文件系统级别验证（路径 + 内容匹配） |
 | `verifyNotification` | 验证特定通知出现 |
 | `verifyEditor` | 验证编辑器内容 |
-| `verifyCommand` | 验证某个命令执行后的返回值 |
+| `verifyProblems` | 验证 Problems 错误/警告计数 |
+| `verifyCompletion` | 验证补全列表 |
+| `verifyQuickInput` | 验证 Quick Input 校验消息 |
+| `verifyDialog` | 验证 modal dialog 可见性和内容 |
+| `verifyTreeItem` | 验证 TreeView 节点出现或消失 |
+| `verifyEditorTab` | 验证 editor tab 标题 |
+| `verifyOutputChannel` | 验证 Output channel 文本 |
+| `verifyTerminal` | 验证 Terminal 文本 |
 | `timeout` | 单步超时（秒） |
 | `waitBefore` | 执行前等待时间（秒） |
 
 ### 5.3 Test Plan 可迭代更新
 
-- 每次执行后，框架输出详细的执行日志和 snapshot
-- 如果某一步失败，AI 可以建议如何修改 test plan
+- 每次执行后，框架输出详细的执行日志、截图和 JSON 报告
+- 如果某一步失败，已配置 Azure OpenAI 时会基于 before/after 截图建议如何修改 test plan
 - 新增测试步骤只需追加 YAML，不需要改代码
 
 ---
 
-## 6. AI Test Runner 执行流程
+## 6. TestRunner 执行流程
 
 ```
 ┌─────────────────────────────────────────────────┐
-│            AI Test Runner 主循环                 │
+│              TestRunner 主循环                   │
 │                                                  │
 │  for each step in testPlan.steps:                │
 │    │                                             │
-│    ├─ 1. snapshot = driver.snapshot()             │
-│    │     拍当前 UI 状态的 A11y 快照              │
+│    ├─ 1. waitBefore（可选）                       │
 │    │                                             │
-│    ├─ 2. actions = AI.plan(step.action, snapshot) │
-│    │     AI 根据步骤描述 + 当前 UI 状态          │
-│    │     决定调用哪些 Driver 原语                │
+│    ├─ 2. before screenshot                        │
 │    │                                             │
-│    ├─ 3. for each action in actions:              │
-│    │       driver.execute(action)                 │
-│    │     执行 AI 规划的操作序列                   │
+│    ├─ 3. ActionResolver.resolve(step.action)      │
+│    │     regex 字典匹配 Driver 原语；未匹配时     │
+│    │     回退为 Command Palette 文本              │
 │    │                                             │
-│    ├─ 4. snapshot = driver.snapshot()             │
-│    │     再次拍快照                               │
+│    ├─ 4. after screenshot                         │
 │    │                                             │
-│    ├─ 5. result = AI.verify(step.verify, snapshot)│
-│    │     AI 对比 snapshot 与预期结果              │
+│    ├─ 5. StepVerifier.verify(step)                │
+│    │     执行所有确定性验证                       │
 │    │                                             │
-│    ├─ 6. 如果有 verifyFile / verifyNotification:  │
-│    │     执行确定性验证（非 AI）                  │
+│    ├─ 6. 若失败且 LLM 已配置：                    │
+│    │     对比 before/after 截图并生成建议         │
 │    │                                             │
 │    └─ 7. 记录结果: pass / fail / reason           │
 │                                                  │
@@ -251,10 +254,10 @@ steps:
 
 | 验证方式 | 何时使用 | 优点 | 缺点 |
 |----------|---------|------|------|
-| **确定性验证** (`verifyFile`, `verifyNotification`) | 有明确的、可程序化检查的预期 | 100% 可靠、可重复 | 需要精确匹配条件 |
-| **AI 验证** (`verify`: 自然语言) | UI 状态、模糊匹配、视觉判断 | 灵活、不需要精确 locator | 有一定误判概率 |
+| **确定性验证** (`verifyFile`, `verifyProblems`, `verifyTerminal` 等) | 有明确的、可程序化检查的预期 | 100% 可靠、可重复 | 需要精确匹配条件 |
+| **AI 失败分析** (`verify`: 自然语言上下文 + 截图) | 步骤失败后解释 UI 变化和可能原因 | 灵活、能给修复建议 | 不决定 pass/fail，有一定误判概率 |
 
-**建议：能用确定性验证的，尽量用确定性验证。AI 验证用于补充。**
+**建议：能用确定性验证的，尽量用确定性验证。AI 用于失败诊断和改进 test plan。**
 
 ---
 
@@ -267,7 +270,7 @@ steps:
 | 目标应用 | 通用（几十个 App 适配） | 专注 VSCode |
 | 输出格式 | table/json/yaml（面向人） | 结构化 JSON（面向 AI） |
 | 使用方式 | CLI 命令 (`opencli vscode command ...`) | SDK + CLI 双模式 |
-| AI 集成 | 无内置 AI 层 | 内置 AI snapshot → 决策 → 验证 循环 |
+| AI 集成 | 无内置 AI 层 | 可选 Azure OpenAI 失败截图分析 |
 | 测试驱动方式 | 需要手动编排命令 | Test Plan 声明式驱动 |
 
 ---
@@ -279,7 +282,7 @@ steps:
 | VSCode 启动/控制 | `@playwright/test` + `@vscode/test-electron` | 官方推荐方案，Electron 原生支持 |
 | CLI 入口 | `commander` | 轻量、成熟 |
 | Test Plan 解析 | `js-yaml` | YAML 解析 |
-| AI 集成 | Copilot CLI / OpenAI API | 理解 action、分析 snapshot、验证结果 |
+| AI 集成 | Copilot CLI / Azure OpenAI API | 运行编排、失败截图分析、修复建议 |
 | 报告输出 | 自定义 JSON + console | 结构化 + 人类可读 |
 | 类型系统 | TypeScript | 类型安全 |
 
@@ -290,7 +293,7 @@ steps:
 | 风险 | 应对 |
 |------|------|
 | VSCode UI 更新导致 A11y 树变化 | 优先用 Command ID；A11y Role 比 CSS 稳定得多 |
-| AI 理解 action 出错 | 提供"操作词典"，将自然语言映射到确定性原语 |
-| AI 验证误判 | 关键验证用确定性方式（verifyFile 等），AI 验证仅做补充 |
-| Electron 启动慢 | 支持复用已启动的 VSCode 实例（通过 CDP 端口连接） |
+| action 映射出错 | 提供 regex 操作词典；未匹配时回退到 Command Palette |
+| AI 分析误判 | pass/fail 只由确定性验证决定，AI 仅做失败分析 |
+| Electron 启动慢 | 复用临时 user-data / extensions 目录并控制进程生命周期；attach 模式为后续扩展点 |
 | 插件加载延迟 | setup 阶段等待插件 activate，可配置超时 |

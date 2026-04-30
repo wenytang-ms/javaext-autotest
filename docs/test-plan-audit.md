@@ -8,13 +8,13 @@ This document audits every wiki test scenario against the actual YAML test plan 
 
 | Wiki Scenario | Wiki Step | What Wiki Requires | What YAML Does | Gap/Issue |
 |---|---|---|---|---|
-| Basic #3 | `class` snippet | Invoke `class` code snippet in `Foo.java`, reduce problems to 1 | `java-basic-editing.yaml` inserts full class body via disk edit | **Snippet UI flow replaced** with direct file edit |
-| Basic #4 | Code Action fix | Click `Create method 'call()' in type Foo'` via Code Action lightbulb | `java-basic-editing.yaml` inserts `call()` via disk edit | **Code Action replaced** with direct disk edit |
-| Basic #5 | Force compilation | Save all, run `Java: Force Java compilation`, expect no errors | `java-basic-editing.yaml` only does Save All + checks problems=0 | **Force compilation skipped** |
-| Basic #6 | File completion + 2 errors | Type `File f = new File("demo.txt");`, completion works for File, **two** errors remain | `java-basic-extended.yaml` inserts text, checks `errors >= 1` after save | **Completion not verified during typing**; error count weaker than wiki |
-| Basic #7 | Organize Imports | Use `Source Action... → Organize Imports` or F1 → Organize Imports | `java-basic-extended.yaml` inserts `import java.io.File;` via disk edit | **Organize Imports command replaced** with direct file edit |
-| Basic #8 | Rename Symbol | Rename `Foo` → `FooNew` via editor, then back via Explorer, verify all references updated | `java-basic-extended.yaml` only opens `Foo.java` and checks content | **Rename skipped entirely** |
-| Basic #9 | New File snippet | Right-click folder → New File → `Hello.java`, verify generated class snippet | `java-new-file-snippet.yaml` creates file on disk and checks body text | **Explorer right-click + snippet generation not exercised** |
+| Basic #3 | `class` snippet | Invoke `class` code snippet in `Foo.java`, reduce problems to 1 | `java-basic-editing.yaml` uses `typeAndTriggerSnippet class` and verifies editor content | Covered |
+| Basic #4 | Code Action fix | Click `Create method 'call()' in type Foo'` via Code Action lightbulb | `java-basic-editing.yaml` uses `navigateToError` + `applyCodeAction Create method 'call()'` | Covered |
+| Basic #5 | Force compilation | Save all, run `Java: Force Java compilation`, expect no errors | `java-basic-editing.yaml` saves all and checks `verifyProblems.errors: 0` | **Force compilation command skipped** |
+| Basic #6 | File completion + 2 errors | Type `File f = new File("demo.txt");`, completion works for File, **two** errors remain | `java-basic-editing.yaml` inserts text via `insertLineInFile`, checks `errors >= 1` | **Completion not verified during typing**; error count weaker than wiki |
+| Basic #7 | Organize Imports | Use `Source Action... → Organize Imports` or F1 → Organize Imports | `java-basic-editing.yaml` uses `organizeImports` and verifies `import java.io.File` on disk | Covered |
+| Basic #8 | Rename Symbol | Rename `Foo` → `FooNew` via editor, then back via Explorer, verify all references updated | `java-basic-editing.yaml` uses `renameSymbol FooNew` and verifies renamed file content | Partially covered — rename back/reference verification omitted |
+| Basic #9 | New File snippet | Right-click folder → New File → `Hello.java`, verify generated class snippet | `java-new-file-snippet.yaml` covers new Java file/snippet flow | Covered |
 | Maven | LS + warnings + editing experience | See several warnings, diagnostics/completion/code actions all work | `java-maven.yaml` checks completion and inserts unused import | Initial warning state not checked; **code actions omitted** |
 | Maven Multimodule | Both modules' editing experience | Verify both modules with diagnostics, completion, code actions | `java-maven-multimodule.yaml` checks errors=0 and completion only | **Warnings, diagnostics, and code actions skipped** |
 | Gradle | Editing experience incl. code actions | Verify no problems, diagnostics/completion/code actions | `java-gradle.yaml` checks errors=0 and completion only | **Code actions skipped** |
@@ -29,25 +29,22 @@ This document audits every wiki test scenario against the actual YAML test plan 
 
 ## Gap Classification
 
-### 1. Core Functionality Replaced with Disk Edits (3 cases)
+### 1. Core Functionality Still Simplified by Disk Edits
 
-These wiki steps require testing VSCode UI interactions but were bypassed with direct file modifications:
+Most earlier disk-edit substitutions have been replaced with real actions. Remaining LS-sensitive edits still use `insertLineInFile` intentionally so the language server sees file changes reliably:
 
 | Step | Required UI | Current Implementation |
 |------|------------|----------------------|
-| Basic #3: class snippet | `typeAndTriggerSnippet class` → generate class skeleton | `insertLineInFile` writes class body directly |
-| Basic #4: Code Action | `navigateToError` → `applyCodeAction` → generate method | `insertLineInFile` writes `call()` directly |
-| Basic #7: Organize Imports | Command Palette → `Organize Imports` | `insertLineInFile` writes import directly |
+| Basic #6: File completion setup | Type `File f = ...` in editor | `insertLineInFile` writes the unresolved `File` line so LS diagnostics are reliable |
 
 **Root cause**: `insertLineInFile` modifies the temp workspace, but Code Action/Organize Imports open the original file path, causing conflicts.
 
-### 2. UI Interactions Skipped Entirely (3 cases)
+### 2. UI Interactions Still Partially Covered
 
 | Step | What's Missing |
 |------|---------------|
-| Basic #8: Rename Symbol | No rename operation at all — needs F2 → type new name → verify references |
 | Basic #5: Force Compilation | `Java: Force Java Compilation` command + Quick Pick selection not executed |
-| Basic #9: New File via Explorer | Right-click → New File → type name flow not exercised |
+| Basic #8: Rename Symbol | Rename back and full reference verification omitted |
 
 ### 3. Verification Too Weak / Auto-Pass (4 cases)
 
@@ -70,7 +67,7 @@ These wiki steps require testing VSCode UI interactions but were bypassed with d
 
 | Priority | Items | Effort |
 |----------|-------|--------|
-| 🔴 High | Rename Symbol, Code Action (real UI), Organize Imports (real command) | Medium — needs fixing temp workspace path issue |
-| 🟡 Medium | Debugger breakpoint verification, Test Runner result verification | Low — add `waitForBreakpointHit()` / `getTestResults()` checks |
+| 🔴 High | Debugger breakpoint/output verification, Test Runner result verification | Low — add deterministic checks with existing Driver methods |
+| 🟡 Medium | Completion interaction coverage, Force Compilation command, full rename reference checks | Medium |
 | 🟢 Low | Dependency Viewer full nodes, Extension Pack fields, second fresh-import repo | Low — add more tree item checks |
 | ⚪ Won't fix | Explorer right-click New File (unstable), Force Compilation Quick Pick (inconsistent) | — |
