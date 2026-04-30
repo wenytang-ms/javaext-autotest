@@ -42,20 +42,20 @@ steps:
 
   # ── Verify project node ─────────────────────────────────
   - id: "expand-project"
-    action: "expand salut tree item"
+    action: "expandTreeItem salut"
     verify: "salut project node expanded"
 
   # ── Verify JDK Libraries node ───────────────────────────
   - id: "verify-jdk"
-    action: "expand JRE System Library tree item"
+    action: "expandTreeItem JRE System Library"
     verify: "JDK Libraries node visible and expandable"
 
   # Collapse JRE to free vertical space, then Maven Dependencies becomes visible
   - id: "collapse-jdk"
-    action: "expand JRE System Library tree item"
+    action: "expandTreeItem JRE System Library"
 
   # ── Verify Maven Dependencies node ──────────────────────
   - id: "verify-maven-deps"
-    action: "expand Maven Dependencies tree item"
+    action: "expandTreeItem Maven Dependencies"
     verify: "Maven Dependencies node visible and expandable"
     timeout: 10

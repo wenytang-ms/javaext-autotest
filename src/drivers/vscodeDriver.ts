@@ -1500,30 +1500,31 @@ export class VscodeDriver {
     await page.waitForTimeout(500);
 
     // Search for the action by inner text using page.evaluate (bypasses shadow DOM)
-    const found = await page.evaluate((lbl) => {
+    const result = await page.evaluate((lbl) => {
+      const labels: string[] = [];
       const widgets = document.querySelectorAll(".action-widget");
       for (const w of widgets) {
         const items = w.querySelectorAll("li, [role='option'], .focused-item, .action-item");
         for (const item of items) {
           const text = item.textContent ?? "";
+          if (text.trim()) labels.push(text.trim());
           if (text.includes(lbl)) {
             (item as HTMLElement).click();
-            return true;
+            return { found: true, labels };
           }
         }
       }
-      return false;
+      return { found: false, labels };
     }, label);
 
-    if (found) {
+    if (result.found) {
       await page.waitForTimeout(1000);
       return;
     }
 
-    // Fallback: press Enter to select the highlighted (first) action
-    console.log(`   ⚠️ Could not find "${label}" by text, pressing Enter for first action`);
-    await page.keyboard.press(ENTER_KEY);
-    await page.waitForTimeout(1000);
+    await page.keyboard.press("Escape");
+    const available = result.labels.length > 0 ? result.labels.join(", ") : "none";
+    throw new Error(`Code action "${label}" not found. Available actions: ${available}`);
   }
 
   /**
@@ -1584,6 +1585,80 @@ export class VscodeDriver {
     await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
 
     return this.readCompletionItems();
+  }
+
+  /**
+   * Move the cursor to a named or explicit position before triggering completion.
+   * Supported positions:
+   * - endOfLine: end of the current line
+   * - endOfMethod: end of the current method body, before its closing brace
+   * - line <n> [column <m>]: explicit editor position
+   */
+  async triggerCompletionAt(position: string): Promise<string[]> {
+    const page = this.getPage();
+    const normalized = position.trim();
+
+    if (/^endOfLine$/i.test(normalized)) {
+      await this.goToEndOfLine();
+      return this.triggerCompletion();
+    }
+
+    const explicit = normalized.match(/^line\s+(\d+)(?:\s+column\s+(\d+))?$/i);
+    if (explicit) {
+      const lineNumber = parseInt(explicit[1], 10);
+      const column = explicit[2] ? parseInt(explicit[2], 10) : undefined;
+      if (column === undefined) {
+        await this.goToLine(lineNumber);
+      } else {
+        await page.evaluate(({ line, col }) => {
+          const editor = (window as any).monaco?.editor?.getEditors?.()?.[0];
+          const model = editor?.getModel?.();
+          if (!editor || !model) return false;
+          const maxLine = model.getLineCount();
+          const targetLine = Math.max(1, Math.min(line, maxLine));
+          const maxColumn = model.getLineMaxColumn(targetLine);
+          editor.setPosition({
+            lineNumber: targetLine,
+            column: Math.max(1, Math.min(col, maxColumn)),
+          });
+          editor.focus();
+          return true;
+        }, { line: lineNumber, col: column });
+      }
+      return this.triggerCompletion();
+    }
+
+    if (/^endOfMethod$/i.test(normalized)) {
+      const moved = await page.evaluate(() => {
+        const editor = (window as any).monaco?.editor?.getEditors?.()?.[0];
+        const model = editor?.getModel?.();
+        if (!editor || !model) return false;
+
+        const currentLine = editor.getPosition?.()?.lineNumber ?? 1;
+        const lineCount = model.getLineCount();
+        for (let line = currentLine; line <= lineCount; line++) {
+          const text = model.getLineContent(line);
+          if (/^\s*}/.test(text) && line > 1) {
+            const targetLine = line - 1;
+            editor.setPosition({
+              lineNumber: targetLine,
+              column: model.getLineMaxColumn(targetLine),
+            });
+            editor.focus();
+            return true;
+          }
+        }
+        return false;
+      });
+      if (!moved) {
+        await this.goToEndOfLine();
+      }
+      return this.triggerCompletion();
+    }
+
+    throw new Error(
+      `Unsupported completion position "${position}". Supported: endOfLine, endOfMethod, line <n> [column <m>]`
+    );
   }
 
   /** Check if the suggest widget is currently visible */

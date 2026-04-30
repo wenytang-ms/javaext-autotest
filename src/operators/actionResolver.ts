@@ -56,23 +56,23 @@ export class ActionResolver {
     return [
       // ── Command Palette ──
       {
-        regex: /selectCommand\s+(.+)/i,
+        regex: /^selectCommand\s+(.+)$/i,
         handler: async (m) => { await d.selectAndRunCommand(m[1]); },
       },
       {
-        regex: /run command\s+(.+)/i,
+        regex: /^run command\s+(.+)$/i,
         handler: async (m) => { await d.runCommandFromPalette(m[1]); },
       },
       {
-        regex: /pressKey\s+(.+)/i,
+        regex: /^pressKey\s+(.+)$/i,
         handler: async (m) => { await d.pressKey(m[1].trim()); },
       },
       {
-        regex: /pressTerminalKey\s+(.+)/i,
+        regex: /^pressTerminalKey\s+(.+)$/i,
         handler: async (m) => { await d.pressTerminalKey(m[1].trim()); },
       },
       {
-        regex: /executeVSCodeCommand\s+(\S+)(?:\s+([\s\S]+))?/i,
+        regex: /^executeVSCodeCommand\s+(\S+)(?:\s+([\s\S]+))?$/i,
         handler: async (m) => {
           const args = m[2] ? [JSON.parse(m[2])] : [];
           await d.executeVSCodeCommand(m[1].trim(), ...args);
@@ -81,121 +81,127 @@ export class ActionResolver {
 
       // ── UI Navigation ──
       {
-        regex: /click side tab\s+(.+?)\s*(?:tab)?$/i,
+        regex: /^click side tab\s+(.+?)\s*(?:tab)?$/i,
         handler: async (m) => { await d.activeSideTab(m[1]); },
       },
       {
-        regex: /collapseSidebarSection\s+(.+)/i,
+        regex: /^collapseSidebarSection\s+(.+)$/i,
         handler: async (m) => { await d.collapseSidebarSection(m[1].trim()); },
       },
       {
-        regex: /collapseWorkspaceRoot$/i,
+        regex: /^collapseWorkspaceRoot$/i,
         handler: async () => { await d.collapseWorkspaceRoot(); },
       },
       {
-        regex: /expandTreeItem\s+(.+)/i,
+        regex: /^expandTreeItem\s+(.+)$/i,
         handler: async (m) => { await d.expandTreeItem(m[1].trim()); },
       },
       {
-        regex: /clickTreeItemAction\s+(.+?)\s+(.+)/i,
-        handler: async (m) => { await d.clickTreeItemAction(m[1].trim(), m[2].trim()); },
+        regex: /^clickTreeItemAction\s+(.+)$/i,
+        handler: async (m) => {
+          const [itemName, actionLabel] = this.parseActionArgs(m[1], 2, "clickTreeItemAction");
+          await d.clickTreeItemAction(itemName, actionLabel);
+        },
       },
       {
-        regex: /contextMenu\s+(\S+)\s+(.+)/i,
-        handler: async (m) => { await d.contextMenuOnTreeItem(m[1], m[2].trim()); },
+        regex: /^contextMenu\s+(.+)$/i,
+        handler: async (m) => {
+          const [itemName, menuLabel] = this.parseActionArgs(m[1], 2, "contextMenu");
+          await d.contextMenuOnTreeItem(itemName, menuLabel);
+        },
       },
       {
-        regex: /(?:click|expand)\s+(.+?)\s*(?:tree item)?$/i,
+        regex: /^click\s+(.+?)\s*(?:tree item)?$/i,
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },
       {
-        regex: /doubleClick\s+(.+?)\s*(?:tree item)?$/i,
+        regex: /^doubleClick\s+(.+?)\s*(?:tree item)?$/i,
         handler: async (m) => { await d.doubleClickTreeItem(m[1]); },
       },
       {
-        regex: /select\s+(.+?)\s*(?:option)?$/i,
+        regex: /^select\s+(.+?)\s*(?:option)?$/i,
         handler: async (m) => { await d.selectPaletteOption(m[1]); },
       },
       {
-        regex: /selectOptionByIndex\s+(\d+)/i,
+        regex: /^selectOptionByIndex\s+(\d+)$/i,
         handler: async (m) => { await d.selectPaletteOptionByIndex(parseInt(m[1], 10)); },
       },
 
       // ── File Operations ──
       {
-        regex: /open file\s+(.+)/i,
+        regex: /^open file\s+(.+)$/i,
         handler: async (m) => { await d.openFile(m[1]); },
       },
       {
-        regex: /savefile/i,
+        regex: /^saveFile$/i,
         handler: async () => { await d.saveFile(); },
       },
       {
-        regex: /insertLineInFile\s+(\S+)\s+(\d+)\s+([\s\S]+)/i,
+        regex: /^insertLineInFile\s+(\S+)\s+(\d+)\s+([\s\S]+)$/i,
         handler: async (m) => {
           await d.insertLineInFile(m[1], parseInt(m[2], 10), m[3].trim());
         },
       },
       {
-        regex: /deleteFile\s+(.+)/i,
+        regex: /^deleteFile\s+(.+)$/i,
         handler: async (m) => { await d.deleteFile(m[1].trim()); },
       },
 
       // ── Wait ──
       // IMPORTANT: waitForLanguageServer must be before generic "wait" pattern
       {
-        regex: /waitForLanguageServer/i,
+        regex: /^waitForLanguageServer$/i,
         handler: async () => {
           const ready = await d.waitForLanguageServer(lsTimeout);
           if (!ready) throw new Error("Language Server did not become ready within timeout");
         },
       },
       {
-        regex: /wait\s*(?:(\d+)\s*(?:seconds?|s))?/i,
+        regex: /^wait(?:\s+(\d+)\s*(?:seconds?|s))?$/i,
         handler: async (m) => { await d.wait(parseInt(m[1] ?? "3", 10)); },
       },
 
       // ── Cursor Navigation ──
       {
-        regex: /goToLine\s+(\d+)/i,
+        regex: /^goToLine\s+(\d+)$/i,
         handler: async (m) => { await d.goToLine(parseInt(m[1], 10)); },
       },
       {
-        regex: /goToEndOfLine/i,
+        regex: /^goToEndOfLine$/i,
         handler: async () => { await d.goToEndOfLine(); },
       },
 
       // ── Editor Input ──
       {
-        regex: /typeAndTriggerSnippet\s+(.+)/i,
+        regex: /^typeAndTriggerSnippet\s+(.+)$/i,
         handler: async (m) => { await d.typeAndTriggerSnippet(m[1].trim()); },
       },
       {
-        regex: /typeInEditor\s+([\s\S]+)/i,
+        regex: /^typeInEditor\s+([\s\S]+)$/i,
         handler: async (m) => { await d.typeInEditor(m[1].trim()); },
       },
 
       // ── Code Intelligence ──
       {
-        regex: /navigateToError\s*(\d+)?/i,
+        regex: /^navigateToError(?:\s+(\d+))?$/i,
         handler: async (m) => {
           await d.navigateToError(parseInt(m[1] ?? "1", 10));
         },
       },
       {
-        regex: /applyCodeAction\s+(.+)/i,
+        regex: /^applyCodeAction\s+(.+)$/i,
         handler: async (m) => { await d.applyCodeAction(m[1].trim()); },
       },
       {
-        regex: /findText\s+(.+)/i,
+        regex: /^findText\s+(.+)$/i,
         handler: async (m) => { await d.findText(m[1].trim()); },
       },
       {
-        regex: /renameSymbol\s+(.+)/i,
+        regex: /^renameSymbol\s+(.+)$/i,
         handler: async (m) => { await d.renameSymbol(m[1].trim()); },
       },
       {
-        regex: /organizeImports/i,
+        regex: /^organizeImports$/i,
         handler: async () => { await d.organizeImports(); },
       },
       {
@@ -203,43 +209,43 @@ export class ActionResolver {
         handler: async () => { await d.triggerCompletion(); },
       },
       {
-        regex: /triggerCompletionAt\s+(.+)/i,
-        handler: async () => { await d.triggerCompletion(); },
+        regex: /^triggerCompletionAt\s+(.+)$/i,
+        handler: async (m) => { await d.triggerCompletionAt(m[1].trim()); },
       },
 
       // ── Debugging ──
       {
-        regex: /startDebugSession/i,
+        regex: /^startDebugSession$/i,
         handler: async () => { await d.startDebugSession(); },
       },
       {
-        regex: /stopDebugSession/i,
+        regex: /^stopDebugSession$/i,
         handler: async () => { await d.stopDebugSession(); },
       },
       {
-        regex: /setBreakpoint\s+(\d+)/i,
+        regex: /^setBreakpoint\s+(\d+)$/i,
         handler: async (m) => { await d.setBreakpoint(parseInt(m[1], 10)); },
       },
       {
-        regex: /debugStepOver/i,
+        regex: /^debugStepOver$/i,
         handler: async () => { await d.debugStepOver(); },
       },
       {
-        regex: /debugStepInto/i,
+        regex: /^debugStepInto$/i,
         handler: async () => { await d.debugStepInto(); },
       },
       {
-        regex: /debugStepOut/i,
+        regex: /^debugStepOut$/i,
         handler: async () => { await d.debugStepOut(); },
       },
 
       // ── Test Runner ──
       {
-        regex: /openTestExplorer/i,
+        regex: /^openTestExplorer$/i,
         handler: async () => { await d.openTestExplorer(); },
       },
       {
-        regex: /waitForTestDiscovery\s+(.+?)(?:\s+(\d+)s)?$/i,
+        regex: /^waitForTestDiscovery\s+(.+?)(?:\s+(\d+)s)?$/i,
         handler: async (m) => {
           const timeoutMs = m[2] ? parseInt(m[2], 10) * 1000 : 300_000;
           const found = await d.waitForTestDiscovery(m[1].trim(), timeoutMs);
@@ -247,93 +253,110 @@ export class ActionResolver {
         },
       },
       {
-        regex: /runAllTests/i,
+        regex: /^runAllTests$/i,
         handler: async () => { await d.runAllTests(); },
       },
       {
-        regex: /runTestsWithProfile\s+(.+)/i,
+        regex: /^runTestsWithProfile\s+(.+)$/i,
         handler: async (m) => { await d.runTestsWithProfile(m[1].trim()); },
       },
       {
-        regex: /clickCodeLens\s+(.+)/i,
+        regex: /^clickCodeLens\s+(.+)$/i,
         handler: async (m) => { await d.clickCodeLens(m[1].trim()); },
       },
 
       // ── Hover ──
       {
-        regex: /hoverOnText\s+(.+)/i,
+        regex: /^hoverOnText\s+(.+)$/i,
         handler: async (m) => { await d.hoverOnText(m[1].trim()); },
       },
       {
-        regex: /dismissHover/i,
+        regex: /^dismissHover$/i,
         handler: async () => { await d.dismissHover(); },
       },
 
       // ── File Explorer ──
       {
-        regex: /createNewFile\s+(\S+)\s+(\S+)/i,
-        handler: async (m) => { await d.createNewFileViaExplorer(m[1], m[2]); },
+        regex: /^createNewFile\s+(.+)$/i,
+        handler: async (m) => {
+          const [parentFolder, fileName] = this.parseActionArgs(m[1], 2, "createNewFile");
+          await d.createNewFileViaExplorer(parentFolder, fileName);
+        },
       },
 
       // ── Dependency tree ──
       {
-        regex: /openDependencyExplorer/i,
+        regex: /^openDependencyExplorer$/i,
         handler: async () => { await d.openDependencyExplorer(); },
       },
 
       // ── Quick Input ──
       {
-        regex: /fillQuickInput\s+([\s\S]+)/i,
+        regex: /^fillQuickInput\s+([\s\S]+)$/i,
         handler: async (m) => { await d.fillQuickInput(m[1].trim()); },
       },
       {
-        regex: /fillAnyInput\s+([\s\S]+)/i,
+        regex: /^fillAnyInput\s+([\s\S]+)$/i,
         handler: async (m) => { await d.fillAnyInput(m[1].trim()); },
       },
       {
-        regex: /typeInQuickInput\s+([\s\S]+)/i,
+        regex: /^typeInQuickInput\s+([\s\S]+)$/i,
         handler: async (m) => { await d.typeInQuickInput(m[1].trim()); },
       },
       {
-        regex: /confirmQuickInput/i,
+        regex: /^confirmQuickInput$/i,
         handler: async () => { await d.confirmQuickInput(); },
       },
       {
-        regex: /dismissQuickInput/i,
+        regex: /^dismissQuickInput$/i,
         handler: async () => { await d.dismissQuickInput(); },
       },
 
       // ── Dialog ──
       {
-        regex: /waitForDialog(?:\s+(\d+))?/i,
+        regex: /^waitForDialog(?:\s+(\d+)\s*(?:seconds?|s)?)?$/i,
         handler: async (m) => {
           const timeout = m[1] ? parseInt(m[1], 10) * 1000 : 10_000;
           await d.waitForDialog(timeout);
         },
       },
       {
-        regex: /clickDialogButton\s+(.+)/i,
+        regex: /^clickDialogButton\s+(.+)$/i,
         handler: async (m) => { await d.clickDialogButton(m[1].trim()); },
       },
       {
-        regex: /tryClickDialogButton\s+(.+)/i,
+        regex: /^tryClickDialogButton\s+(.+)$/i,
         handler: async (m) => { await d.tryClickDialogButton(m[1].trim()); },
       },
       {
-        regex: /confirmDialog/i,
+        regex: /^confirmDialog$/i,
         handler: async () => { await d.confirmDialog(); },
       },
       {
-        regex: /tryClickButton\s+(.+)/i,
+        regex: /^tryClickButton\s+(.+)$/i,
         handler: async (m) => { await d.tryClickButton(m[1].trim()); },
       },
-      {
-        regex: /waitForDialog\s*(?:(\d+)\s*(?:seconds?|s))?/i,
-        handler: async (m) => {
-          const timeoutMs = m[1] ? parseInt(m[1], 10) * 1000 : 10_000;
-          await d.waitForDialog(timeoutMs);
-        },
-      },
     ];
+  }
+
+  private parseActionArgs(input: string, expected: number, actionName: string): string[] {
+    const args: string[] = [];
+    const pattern = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|(\S+)/g;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(input)) !== null) {
+      const value = match[1] ?? match[2] ?? match[3] ?? "";
+      args.push(value.replace(/\\(["'])/g, "$1"));
+    }
+
+    if (args.length === expected) {
+      return args;
+    }
+    if (expected === 2 && args.length > 2) {
+      return [args[0], args.slice(1).join(" ")];
+    }
+
+    throw new Error(
+      `Invalid ${actionName} arguments. Expected ${expected} argument(s); use quotes for values that contain spaces.`
+    );
   }
 }

@@ -176,7 +176,7 @@ steps:
     verify: "The API Center panel is visible"
 
   - id: "expand-subscription"
-    action: "expand Azure Subscription tree item"
+    action: "expandTreeItem Azure Subscription"
     verify: "The apic-test service is visible"
 
   - id: "register-api"

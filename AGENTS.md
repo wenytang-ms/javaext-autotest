@@ -119,8 +119,8 @@ steps:
 |--------|-------------|
 | `waitForLanguageServer` | Poll until LS shows "Ready" |
 | `triggerCompletion` | Trigger IntelliSense completion |
-| `triggerCompletionAt <place>` | Alias that currently triggers IntelliSense at the current cursor position |
-| `applyCodeAction <label>` | Ctrl+. → click action by label (partial match) |
+| `triggerCompletionAt <position>` | Move cursor then trigger IntelliSense; supports `endOfLine`, `endOfMethod`, and `line <n> [column <m>]` |
+| `applyCodeAction <label>` | Ctrl+. → click action by label (partial match); fails if the label is not found |
 | `organizeImports` | Shift+Alt+O |
 | `renameSymbol <newName>` | F2 rename |
 | `hoverOnText <text>` | Hover to trigger hover provider |
@@ -148,9 +148,9 @@ steps:
 | Action | Description |
 |--------|-------------|
 | `clickTreeItemAction <item> <label>` | Click inline hover button on tree item (e.g. "Run", "New...") |
-| `contextMenu <item> <menuLabel>` | Right-click tree item → select context menu option |
+| `contextMenu <item> <menuLabel>` | Right-click tree item → select context menu option; quote args that contain spaces |
 | `openDependencyExplorer` | Open the Java Dependencies view |
-| `createNewFile <folder> <name>` | Create file via Explorer right-click → New File |
+| `createNewFile <folder> <name>` | Create file via Explorer right-click → New File; quote args that contain spaces |
 
 ### Quick Input / Dialog
 | Action | Description |
@@ -248,13 +248,13 @@ VSCode uses virtualized lists — off-screen items are NOT in the DOM. If expand
 
 ```yaml
 - id: "expand-jdk"
-  action: "expand JRE System Library tree item"
+  action: "expandTreeItem JRE System Library"
 
 - id: "collapse-jdk"     # ← collapse to free space
-  action: "expand JRE System Library tree item"
+  action: "click JRE System Library tree item"
 
 - id: "expand-maven"     # ← now visible
-  action: "expand Maven Dependencies tree item"
+  action: "expandTreeItem Maven Dependencies"
 ```
 
 ### 8. Rename Verification — File Rename
