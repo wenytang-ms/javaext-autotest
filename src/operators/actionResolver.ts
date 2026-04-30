@@ -68,6 +68,10 @@ export class ActionResolver {
         handler: async (m) => { await d.pressKey(m[1].trim()); },
       },
       {
+        regex: /(?:pressTerminalKey|终端按键)\s+(.+)/i,
+        handler: async (m) => { await d.pressTerminalKey(m[1].trim()); },
+      },
+      {
         regex: /(?:executeVSCodeCommand|执行VSCode命令)\s+(\S+)(?:\s+([\s\S]+))?/i,
         handler: async (m) => {
           const args = m[2] ? [JSON.parse(m[2])] : [];

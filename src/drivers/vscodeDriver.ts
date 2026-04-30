@@ -478,6 +478,16 @@ export class VscodeDriver {
     await page.waitForTimeout(300);
   }
 
+  /** Focus the active integrated terminal and press a keyboard key. */
+  async pressTerminalKey(key: string): Promise<void> {
+    const page = this.getPage();
+    const terminal = page.locator(".terminal-wrapper .xterm, .terminal-wrapper").last();
+    await terminal.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await terminal.click({ force: true });
+    await page.keyboard.press(key);
+    await page.waitForTimeout(300);
+  }
+
   /** Open a file via Quick Open (Ctrl+P). Retries if the file indexer isn't ready. */
   async openFile(filePath: string): Promise<void> {
     const page = this.getPage();
@@ -635,7 +645,14 @@ export class VscodeDriver {
   private resolveWorkspacePlaceholders(value: unknown): unknown {
     if (typeof value === "string") {
       const wsPath = this.getWorkspacePath();
-      return value.startsWith("~/") && wsPath ? path.join(wsPath, value.substring(2)) : value;
+      if (!wsPath) {
+        return value;
+      }
+      const wsParent = path.dirname(wsPath);
+      const resolvedHome = value.startsWith("~/") ? path.join(wsPath, value.substring(2)) : value;
+      return resolvedHome
+        .replace(/\$\{workspaceFolder\}/g, wsPath)
+        .replace(/\$\{workspaceParent\}/g, wsParent);
     }
     if (Array.isArray(value)) {
       return value.map(item => this.resolveWorkspacePlaceholders(item));
@@ -1030,10 +1047,11 @@ export class VscodeDriver {
   async fillQuickInput(text: string): Promise<void> {
     // Wait longer for the quick input to appear — some operations (e.g., rename)
     // show the input box with a delay after processing
+    const resolvedText = this.resolveWorkspacePlaceholders(text) as string;
     const page = this.getPage();
     const input = page.locator(QUICK_INPUT_SELECTOR);
     await input.waitFor({ state: "visible", timeout: 15_000 });
-    await input.fill(text);
+    await input.fill(resolvedText);
     await page.waitForTimeout(500);
     await page.keyboard.press(ENTER_KEY);
     await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
@@ -1044,6 +1062,7 @@ export class VscodeDriver {
    * Useful when the input type depends on the platform or VSCode version.
    */
   async fillAnyInput(text: string): Promise<void> {
+    const resolvedText = this.resolveWorkspacePlaceholders(text) as string;
     const page = this.getPage();
 
     // Try quick input (showInputBox) first
@@ -1055,14 +1074,14 @@ export class VscodeDriver {
     const deadline = Date.now() + 15_000;
     while (Date.now() < deadline) {
       if (await quickInput.isVisible().catch(() => false)) {
-        await quickInput.fill(text);
+        await quickInput.fill(resolvedText);
         await page.waitForTimeout(300);
         await page.keyboard.press(ENTER_KEY);
         await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
         return;
       }
       if (await inlineInput.isVisible().catch(() => false)) {
-        await inlineInput.fill(text);
+        await inlineInput.fill(resolvedText);
         await page.waitForTimeout(300);
         await page.keyboard.press(ENTER_KEY);
         await page.waitForTimeout(500);
@@ -1097,10 +1116,11 @@ export class VscodeDriver {
 
   /** Type text into the currently visible quick input box (without pressing Enter) */
   async typeInQuickInput(text: string): Promise<void> {
+    const resolvedText = this.resolveWorkspacePlaceholders(text) as string;
     const page = this.getPage();
     const input = page.locator(QUICK_INPUT_SELECTOR);
     await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await input.fill(text);
+    await input.fill(resolvedText);
     await page.waitForTimeout(500); // wait for validation to run
   }
 
