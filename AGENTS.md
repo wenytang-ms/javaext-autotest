@@ -151,6 +151,7 @@ steps:
 | `clickTreeItemAction <item> <label>` | Click inline hover button on tree item (e.g. "Run", "New...") |
 | `clickViewTitleAction <view> <label>` | Click an action button in a sidebar view's title bar; falls back to the "Views and More Actions..." overflow menu when the action is not directly visible. Quote args that contain spaces |
 | `contextMenu <item> <menuLabel>` | Right-click tree item → select context menu option; quote args that contain spaces |
+| `contextMenuOnEditorTab <tab> <menuLabel>` | Right-click an open editor tab → select an item from the editor/title/context menu (e.g. "Reveal in Java Project Explorer"); quote args that contain spaces |
 | `openDependencyExplorer` | Open the Java Dependencies view |
 | `createNewFile <folder> <name>` | Create file via Explorer right-click → New File; quote args that contain spaces |
 

@@ -27,6 +27,7 @@ export interface EditorOperations {
   isCompletionVisible(): Promise<boolean>;
   readCompletionItems(): Promise<string[]>;
   dismissCompletion(): Promise<void>;
+  contextMenuOnEditorTab(tabName: string, menuLabel: string): Promise<void>;
 }
 
 export const editorOperations: EditorOperations = {
@@ -359,5 +360,29 @@ export const editorOperations: EditorOperations = {
 
   async dismissCompletion(this: DriverContext): Promise<void> {
     await dismissWidget(this.getPage(), SELECTORS.SUGGEST_WIDGET);
+  },
+
+  async contextMenuOnEditorTab(this: DriverContext, tabName: string, menuLabel: string): Promise<void> {
+    const page = this.getPage();
+    const tab = page.getByRole("tab", { name: tabName }).first();
+    await tab.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await tab.scrollIntoViewIfNeeded().catch(() => { /* best effort */ });
+    // Right-click on the tab to open the editor/title/context menu.
+    await tab.click({ button: "right" });
+
+    const menu = page.locator(".monaco-menu-container .monaco-menu, .context-view .monaco-menu").first();
+    await menu.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    const menuItem = menu.getByRole("menuitem", { name: menuLabel }).first();
+    await menuItem.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    // Hover first so VS Code marks the item as focused before the click —
+    // avoids a "click without prior focus" race that can dismiss the menu
+    // without firing the action.
+    await menuItem.hover();
+    await page.locator(".monaco-menu-container .action-item.focused").waitFor({
+      state: "visible",
+      timeout: DEFAULT_TIMEOUT,
+    }).catch(() => { /* best effort */ });
+    await menuItem.click();
+    await page.waitForTimeout(500);
   },
 };

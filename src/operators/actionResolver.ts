@@ -122,6 +122,13 @@ export class ActionResolver {
         },
       },
       {
+        regex: /^contextMenuOnEditorTab\s+(.+)$/i,
+        handler: async (m) => {
+          const [tabName, menuLabel] = this.parseActionArgs(m[1], 2, "contextMenuOnEditorTab");
+          await d.contextMenuOnEditorTab(tabName, menuLabel);
+        },
+      },
+      {
         regex: /^click\s+(.+?)\s*(?:tree item)?$/i,
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },
