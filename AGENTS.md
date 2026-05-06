@@ -353,6 +353,15 @@ Quote arguments that contain spaces. Both the view name and the action label are
 
 `getByRole("treeitem", { name })` is **case-insensitive**. If the Explorer has a folder called `INVISIBLE` and Java Projects has a node called `invisible`, they will both match. Be aware of this when working with projects whose names match sidebar section headers.
 
+### 19. `executeVSCodeCommand` Mechanics
+
+`executeVSCodeCommand` does NOT call `window.driver.executeCommand` — VS Code's smoke-test driver does not expose that API. Instead, the framework writes a fresh entry to `${userDataDir}/User/keybindings.json` mapping the command id to one of 12 reserved chords (`Ctrl+Alt+Shift+F1..F12`) and then dispatches the chord through Playwright. Implications:
+
+- **12-unique-command cap per session.** Reuse commands across steps when possible. The 13th unique `(commandId, args)` pair fails fast with a clear error.
+- **~1.5 s overhead the first time each command is used.** This covers VS Code's keybindings-file watcher debounce; subsequent calls to the same `(commandId, args)` reuse the existing binding with no extra wait.
+- **Single-arg semantics.** `keybindings.json` only accepts one `args` value, so calls are packed as: 0 args → omit `args`; 1 arg → pass as-is; >1 args → packed into an array. For commands with multiple positional args, prefer wrapping them in an extension command that takes a single options object.
+- **Prefer `run command <Command Name>` when the command appears in the palette** — it skips the keybinding round-trip entirely.
+
 ## CLI Options
 
 ### `autotest run <plan>`

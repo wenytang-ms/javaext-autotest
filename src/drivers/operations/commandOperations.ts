@@ -149,6 +149,20 @@ export const commandOperations: CommandOperations = {
     await page.waitForTimeout(300);
   },
 
+  /**
+   * Run an arbitrary VS Code command by id, including commands hidden from the
+   * palette (`"when": false` in `commandPalette` menu).
+   *
+   * **Multi-arg semantics:** `keybindings.json` only accepts a single `args` value,
+   * so this implementation packs the call as follows:
+   *   - 0 args  → omit `args`
+   *   - 1 arg   → pass the single value as-is
+   *   - >1 args → pack them into an array and pass that array as `args`
+   *
+   * Commands that natively take multiple positional arguments are uncommon; if
+   * you need to call one, prefer wrapping it in an extension command that
+   * accepts a single options object.
+   */
   async executeVSCodeCommand(this: DriverContext, commandId: string, ...args: unknown[]): Promise<void> {
     const resolvedArgs = args.map(arg => this.resolveWorkspacePlaceholders(arg));
     // VS Code's smoke-test driver does NOT expose `executeCommand` on `window.driver`

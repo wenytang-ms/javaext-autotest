@@ -46,6 +46,13 @@ const KEYBINDING_POOL = [
   "ctrl+alt+shift+f10", "ctrl+alt+shift+f11", "ctrl+alt+shift+f12",
 ];
 
+/**
+ * Time to wait after rewriting `keybindings.json` so VS Code's user-keybindings
+ * file watcher picks up the change. The actual reload typically completes in
+ * < 500 ms; 1500 ms is a conservative safety margin to keep flakes out of CI.
+ */
+const KEYBINDING_RELOAD_DELAY_MS = 1500;
+
 interface KeybindingEntry {
   commandId: string;
   args: unknown[];
@@ -286,6 +293,7 @@ export class VscodeDriver {
     // Start each session with an empty keybindings.json so VS Code does not
     // pick up stale bindings from a previous run that shared this dir.
     const keybindingsPath = path.join(actualUserDataDir, "User", "keybindings.json");
+    fs.mkdirSync(path.dirname(keybindingsPath), { recursive: true });
     fs.writeFileSync(keybindingsPath, "[]");
 
     this.app = await _electron.launch({
@@ -585,11 +593,10 @@ export class VscodeDriver {
       }
       return out;
     });
+    fs.mkdirSync(path.dirname(keybindingsPath), { recursive: true });
     fs.writeFileSync(keybindingsPath, JSON.stringify(json, null, 2));
-    // VS Code's UserKeybindings service watches this file with a small debounce.
-    // 1500ms is conservative — the actual reload typically completes in < 500ms.
     if (this.page) {
-      await this.page.waitForTimeout(1500);
+      await this.page.waitForTimeout(KEYBINDING_RELOAD_DELAY_MS);
     }
   }
 
