@@ -4,6 +4,7 @@ import { DEFAULT_TIMEOUT, KEYS, SELECTORS, getModifierKey } from "./_shared.js";
 interface DriverContext {
   getPage(): Page;
   resolveWorkspacePlaceholders(value: unknown): unknown;
+  assignKeybindingForCommand(commandId: string, args: unknown[]): Promise<string>;
 }
 
 export interface CommandOperations {
@@ -148,19 +149,34 @@ export const commandOperations: CommandOperations = {
     await page.waitForTimeout(300);
   },
 
+  /**
+   * Run an arbitrary VS Code command by id, including commands hidden from the
+   * palette (`"when": false` in `commandPalette` menu).
+   *
+   * **Multi-arg semantics:** `keybindings.json` only accepts a single `args` value,
+   * so this implementation packs the call as follows:
+   *   - 0 args  → omit `args`
+   *   - 1 arg   → pass the single value as-is
+   *   - >1 args → pack them into an array and pass that array as `args`
+   *
+   * Commands that natively take multiple positional arguments are uncommon; if
+   * you need to call one, prefer wrapping it in an extension command that
+   * accepts a single options object.
+   */
   async executeVSCodeCommand(this: DriverContext, commandId: string, ...args: unknown[]): Promise<void> {
     const resolvedArgs = args.map(arg => this.resolveWorkspacePlaceholders(arg));
-    await this.getPage().evaluate(
-      async ({ id, commandArgs }) => {
-        const driver = (window as any).driver;
-        if (!driver?.executeCommand) {
-          throw new Error("VS Code smoke test driver executeCommand API is not available.");
-        }
-        await driver.executeCommand(id, ...commandArgs);
-      },
-      { id: commandId, commandArgs: resolvedArgs }
-    );
-    await this.getPage().waitForTimeout(500);
+    // VS Code's smoke-test driver does NOT expose `executeCommand` on `window.driver`
+    // (only typeInEditor, getElements, getTerminalBuffer and a handful of others —
+    // see src/vs/workbench/services/driver/browser/driver.ts upstream). To run a
+    // command by id — including palette-hidden commands ("when": false in the
+    // package.json `commandPalette` menu) — we register the command as a user
+    // keybinding and dispatch the binding via Playwright. Bindings persist in
+    // ${userDataDir}/User/keybindings.json for the session and are pooled, so
+    // repeated calls to the same (commandId, args) reuse the same key.
+    const playwrightKey = await this.assignKeybindingForCommand(commandId, resolvedArgs);
+    const page = this.getPage();
+    await page.keyboard.press(playwrightKey);
+    await page.waitForTimeout(500);
   },
 
   async runInTerminal(this: DriverContext, command: string): Promise<void> {

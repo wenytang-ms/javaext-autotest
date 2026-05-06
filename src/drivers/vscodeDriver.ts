@@ -30,6 +30,35 @@ import { verificationOperations, type VerificationOperations } from "./operation
 
 const WORKBENCH_SELECTOR = ".monaco-workbench";
 
+/**
+ * Pool of keybinding combinations used to drive VS Code commands by id.
+ *
+ * VS Code's smoke-test driver does NOT expose `executeCommand` on `window.driver`
+ * (see src/vs/workbench/services/driver/browser/driver.ts). Instead, we register
+ * each requested command as a user keybinding and dispatch the binding via
+ * Playwright. These combinations were chosen to avoid clashing with default
+ * VS Code keybindings on Linux/macOS/Windows.
+ */
+const KEYBINDING_POOL = [
+  "ctrl+alt+shift+f1", "ctrl+alt+shift+f2", "ctrl+alt+shift+f3",
+  "ctrl+alt+shift+f4", "ctrl+alt+shift+f5", "ctrl+alt+shift+f6",
+  "ctrl+alt+shift+f7", "ctrl+alt+shift+f8", "ctrl+alt+shift+f9",
+  "ctrl+alt+shift+f10", "ctrl+alt+shift+f11", "ctrl+alt+shift+f12",
+];
+
+/**
+ * Time to wait after rewriting `keybindings.json` so VS Code's user-keybindings
+ * file watcher picks up the change. The actual reload typically completes in
+ * < 500 ms; 1500 ms is a conservative safety margin to keep flakes out of CI.
+ */
+const KEYBINDING_RELOAD_DELAY_MS = 1500;
+
+interface KeybindingEntry {
+  commandId: string;
+  args: unknown[];
+  key: string;
+}
+
 export class VscodeDriver {
   private app: ElectronApplication | null = null;
   private page: Page | null = null;
@@ -40,6 +69,10 @@ export class VscodeDriver {
   private tempWorkspaceDir: string | null = null;
   /** Git worktree path — cleaned up on close() */
   private worktreeRoot: string | null = null;
+  /** User data dir actually used by the launched VS Code (for keybindings.json writes) */
+  private actualUserDataDir: string | null = null;
+  /** Lazy mapping of (commandId+args) → keybinding key for executeVSCodeCommand */
+  private keybindingsByCommand: KeybindingEntry[] = [];
 
   constructor(options: VscodeDriverOptions = {}) {
     this.options = {
@@ -58,6 +91,10 @@ export class VscodeDriver {
       console.log("⚠️  Closing previous VSCode instance...");
       await this.close();
     }
+
+    // Reset per-launch keybinding state — each VS Code session gets a fresh pool.
+    this.keybindingsByCommand = [];
+    this.actualUserDataDir = null;
 
     const version = this.options.vscodeVersion ?? "insiders";
     const vscodePath = await downloadAndUnzipVSCode(version);
@@ -152,6 +189,11 @@ export class VscodeDriver {
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",
+      // Force a predictable chromium window size — Xvfb resolution alone does NOT
+      // size the renderer; chromium falls back to its 1024x768 / 1440x900 default
+      // unless told otherwise. A larger window keeps view rows out from under
+      // sticky pane-headers in CI.
+      "--window-size=1920,1080",
       ...(trustMode === "disabled" ? ["--disable-workspace-trust"] : []),
       "--password-store=basic",
       "--enable-smoke-test-driver",
@@ -244,6 +286,15 @@ export class VscodeDriver {
       ...this.options.settings,
     };
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    // Track the user data dir so executeVSCodeCommand can rewrite keybindings.json
+    // at runtime to register on-the-fly bindings for command-id dispatch.
+    this.actualUserDataDir = actualUserDataDir;
+    // Start each session with an empty keybindings.json so VS Code does not
+    // pick up stale bindings from a previous run that shared this dir.
+    const keybindingsPath = path.join(actualUserDataDir, "User", "keybindings.json");
+    fs.mkdirSync(path.dirname(keybindingsPath), { recursive: true });
+    fs.writeFileSync(keybindingsPath, "[]");
 
     this.app = await _electron.launch({
       executablePath: vscodePath,
@@ -472,6 +523,101 @@ export class VscodeDriver {
     if (!this.tempWorkspaceDir) return null;
     const entries = fs.readdirSync(this.tempWorkspaceDir);
     return entries.length > 0 ? path.join(this.tempWorkspaceDir, entries[0]) : null;
+  }
+
+  /**
+   * Allocate (or reuse) a user keybinding for a `(commandId, args)` pair and
+   * return the Playwright key chord that fires it.
+   *
+   * Used by `executeVSCodeCommand` to drive arbitrary command IDs — including
+   * those hidden from the command palette via `"when": false` — without relying
+   * on `window.driver.executeCommand`, which VS Code's smoke-test driver does
+   * not expose.
+   *
+   * Side effect: rewrites `${userDataDir}/User/keybindings.json` and waits long
+   * enough for VS Code's user-keybindings file watcher to pick up the change.
+   *
+   * @throws if more than KEYBINDING_POOL.length unique (commandId+args) pairs
+   *         have been requested in this session.
+   */
+  async assignKeybindingForCommand(commandId: string, args: unknown[]): Promise<string> {
+    if (!this.actualUserDataDir) {
+      throw new Error("VscodeDriver.assignKeybindingForCommand called before launch().");
+    }
+
+    const cacheKey = this.keybindingCacheKey(commandId, args);
+    const existing = this.keybindingsByCommand.find(
+      b => this.keybindingCacheKey(b.commandId, b.args) === cacheKey,
+    );
+    if (existing) {
+      return this.toPlaywrightKey(existing.key);
+    }
+
+    if (this.keybindingsByCommand.length >= KEYBINDING_POOL.length) {
+      throw new Error(
+        `executeVSCodeCommand keybinding pool exhausted (max ${KEYBINDING_POOL.length} unique ` +
+        `commands per session). Reuse commands across steps or extend KEYBINDING_POOL.`,
+      );
+    }
+
+    const entry: KeybindingEntry = {
+      commandId,
+      args,
+      key: KEYBINDING_POOL[this.keybindingsByCommand.length],
+    };
+    this.keybindingsByCommand.push(entry);
+    await this.flushKeybindings();
+    return this.toPlaywrightKey(entry.key);
+  }
+
+  private keybindingCacheKey(commandId: string, args: unknown[]): string {
+    return `${commandId}|${JSON.stringify(args)}`;
+  }
+
+  /** Serialize the current keybinding map to keybindings.json and wait for VS Code to reload. */
+  private async flushKeybindings(): Promise<void> {
+    if (!this.actualUserDataDir) return;
+    const keybindingsPath = path.join(this.actualUserDataDir, "User", "keybindings.json");
+    const json = this.keybindingsByCommand.map(entry => {
+      const out: { key: string; command: string; args?: unknown } = {
+        key: entry.key,
+        command: entry.commandId,
+      };
+      // VS Code keybindings allow a single `args` value (string/object/array/etc.).
+      // We support 0 or 1 positional args from executeVSCodeCommand; multi-arg
+      // commands are uncommon and intentionally not supported via this path.
+      if (entry.args.length === 1) {
+        out.args = entry.args[0];
+      } else if (entry.args.length > 1) {
+        out.args = entry.args;
+      }
+      return out;
+    });
+    fs.mkdirSync(path.dirname(keybindingsPath), { recursive: true });
+    fs.writeFileSync(keybindingsPath, JSON.stringify(json, null, 2));
+    if (this.page) {
+      await this.page.waitForTimeout(KEYBINDING_RELOAD_DELAY_MS);
+    }
+  }
+
+  /**
+   * Convert a VS Code keybindings.json key string ("ctrl+alt+shift+f1") into a
+   * Playwright chord ("Control+Alt+Shift+F1").
+   */
+  private toPlaywrightKey(keybindingsKey: string): string {
+    return keybindingsKey
+      .split("+")
+      .map(part => {
+        const lower = part.trim().toLowerCase();
+        if (lower === "ctrl") return "Control";
+        if (lower === "cmd" || lower === "meta") return "Meta";
+        if (lower === "alt" || lower === "option") return "Alt";
+        if (lower === "shift") return "Shift";
+        if (/^f\d+$/.test(lower)) return lower.toUpperCase();
+        if (lower.length === 1) return lower.toUpperCase();
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+      })
+      .join("+");
   }
 
   // ═══════════════════════════════════════════════════════
