@@ -8,6 +8,12 @@
 import * as path from "node:path";
 import type { VscodeDriver } from "../drivers/vscodeDriver.js";
 import type { TestStep } from "../types.js";
+import {
+  DEFAULT_POLL_INTERVAL_MS,
+  DEFAULT_TREE_ITEM_TIMEOUT_S,
+  PROBLEMS_POLL_INTERVAL_MS,
+} from "./defaults.js";
+import { computeDeadline, pollUntil, type VerifyResult } from "./verifierUtils.js";
 
 export class StepVerifier {
   private driver: VscodeDriver;
@@ -78,19 +84,16 @@ export class StepVerifier {
     if (!step.verifyFile) return null;
 
     // Support workspace-relative paths with "~/" prefix and workspace placeholders.
-    let filePath = step.verifyFile.path;
+    const rawPath = step.verifyFile.path;
     const wsPath = this.driver.getWorkspacePath();
-    if (wsPath) {
-      if (filePath.startsWith("~/")) {
-        filePath = path.join(wsPath, filePath.substring(2));
-      }
-      filePath = filePath
-        .replace(/\$\{workspaceFolder\}/g, wsPath)
-        .replace(/\$\{workspaceParent\}/g, path.dirname(wsPath));
-    } else if (filePath.startsWith("~/") || filePath.includes("${workspaceFolder}") || filePath.includes("${workspaceParent}")) {
+    const needsWorkspace =
+      rawPath.startsWith("~/") ||
+      rawPath.includes("${workspaceFolder}") ||
+      rawPath.includes("${workspaceParent}");
+    if (needsWorkspace && !wsPath) {
       return { passed: false, reason: "No workspace path available for workspace-relative path" };
     }
-    filePath = path.resolve(filePath);
+    const filePath = path.resolve(this.driver.resolveWorkspacePlaceholders(rawPath) as string);
     if (step.verifyFile.exists === false) {
       const exists = await this.driver.fileExists(filePath);
       if (exists) return { passed: false, reason: `File should not exist: ${filePath}` };
@@ -135,54 +138,47 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyProblems(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyProblems(step: TestStep): Promise<VerifyResult | null> {
     if (!step.verifyProblems) return null;
 
-    const maxWait = (step.timeout ?? 30) * 1000;
-    const pollInterval = 3000;
-    const deadline = Date.now() + maxWait;
+    const expected = step.verifyProblems;
     let lastCounts = { errors: 0, warnings: 0 };
+    const matches = (actual: number, target?: number) =>
+      target === undefined || (expected.atLeast ? actual >= target : actual === target);
 
-    while (Date.now() < deadline) {
-      lastCounts = await this.driver.getProblemsCount();
-      // -1 means status bar not ready yet — keep polling
-      if (lastCounts.errors === -1) {
-        await this.driver.wait(pollInterval / 1000);
-        continue;
-      }
-      const errorsOk = step.verifyProblems.errors === undefined || (
-        step.verifyProblems.atLeast
-          ? lastCounts.errors >= step.verifyProblems.errors
-          : lastCounts.errors === step.verifyProblems.errors
-      );
-      const warningsOk = step.verifyProblems.warnings === undefined || (
-        step.verifyProblems.atLeast
-          ? lastCounts.warnings >= step.verifyProblems.warnings
-          : lastCounts.warnings === step.verifyProblems.warnings
-      );
-      if (errorsOk && warningsOk) return { passed: true };
-      await this.driver.wait(pollInterval / 1000);
-    }
-
-    const parts: string[] = [];
-    if (step.verifyProblems.errors !== undefined) {
-      const cmp = step.verifyProblems.atLeast ? "at least " : "";
-      parts.push(`Expected ${cmp}${step.verifyProblems.errors} errors, got ${lastCounts.errors}`);
-    }
-    if (step.verifyProblems.warnings !== undefined) {
-      const cmp = step.verifyProblems.atLeast ? "at least " : "";
-      parts.push(`Expected ${cmp}${step.verifyProblems.warnings} warnings, got ${lastCounts.warnings}`);
-    }
-    return { passed: false, reason: parts.join("; ") };
+    return pollUntil<VerifyResult>(step, {
+      pollIntervalMs: PROBLEMS_POLL_INTERVAL_MS,
+      waitFn: (s) => this.driver.wait(s),
+      check: async () => {
+        lastCounts = await this.driver.getProblemsCount();
+        // -1 means status bar not ready yet — keep polling
+        if (lastCounts.errors === -1) return { done: false };
+        if (matches(lastCounts.errors, expected.errors) && matches(lastCounts.warnings, expected.warnings)) {
+          return { done: true, result: { passed: true } };
+        }
+        return { done: false };
+      },
+      onTimeout: async () => {
+        const parts: string[] = [];
+        if (expected.errors !== undefined) {
+          const cmp = expected.atLeast ? "at least " : "";
+          parts.push(`Expected ${cmp}${expected.errors} errors, got ${lastCounts.errors}`);
+        }
+        if (expected.warnings !== undefined) {
+          const cmp = expected.atLeast ? "at least " : "";
+          parts.push(`Expected ${cmp}${expected.warnings} warnings, got ${lastCounts.warnings}`);
+        }
+        return { passed: false, reason: parts.join("; ") };
+      },
+    });
   }
 
-  private async verifyCompletion(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyCompletion(step: TestStep): Promise<VerifyResult | null> {
     if (!step.verifyCompletion) return null;
 
-    const maxWait = (step.timeout ?? 30) * 1000;
-    const pollInterval = 1000;
-    const deadline = Date.now() + maxWait;
     const vc = step.verifyCompletion;
+    const deadline = computeDeadline(step);
+    const pollIntervalSeconds = DEFAULT_POLL_INTERVAL_MS / 1000;
 
     // Trigger completion once — then poll the open widget
     await this.driver.triggerCompletion();
@@ -191,72 +187,37 @@ export class StepVerifier {
 
     while (Date.now() < deadline) {
       // If the widget closed itself, retrigger
-      const visible = await this.driver.isCompletionVisible();
-      if (!visible) {
+      if (!(await this.driver.isCompletionVisible())) {
         await this.driver.triggerCompletion();
-        await this.driver.wait(pollInterval / 1000);
+        await this.driver.wait(pollIntervalSeconds);
         continue;
       }
 
-      const items = await this.driver.readCompletionItems();
-      lastItems = items;
+      lastItems = await this.driver.readCompletionItems();
 
-      // Check positive conditions first (notEmpty, contains)
-      if (vc.notEmpty && items.length === 0) {
-        await this.driver.wait(pollInterval / 1000);
+      if (vc.notEmpty && lastItems.length === 0) {
+        await this.driver.wait(pollIntervalSeconds);
         continue;
       }
-
-      let positivesMet = true;
-      if (vc.contains) {
-        for (const expected of vc.contains) {
-          const found = items.some((item) =>
-            item.toLowerCase().includes(expected.toLowerCase())
-          );
-          if (!found) {
-            positivesMet = false;
-            break;
-          }
-        }
-      }
-
-      if (!positivesMet) {
+      if (vc.contains && !this.containsAll(lastItems, vc.contains)) {
         console.log(`   ⏳ Completion missing expected items, retrying...`);
-        await this.driver.wait(pollInterval / 1000);
+        await this.driver.wait(pollIntervalSeconds);
         continue;
       }
 
-      // Positive conditions met — now check excludes.
-      // Wait a short grace period and re-read to let the list settle,
-      // since LS items may still be arriving.
+      // Positive conditions met — grace period for the LS to deliver remaining
+      // items, then re-read before checking excludes.
       await this.driver.wait(1);
       const settledItems = await this.driver.readCompletionItems();
-      lastItems = settledItems.length > 0 ? settledItems : lastItems;
+      if (settledItems.length > 0) lastItems = settledItems;
 
-      if (vc.excludes) {
-        for (const excluded of vc.excludes) {
-          const found = lastItems.some((item) =>
-            item.toLowerCase().includes(excluded.toLowerCase())
-          );
-          if (found) {
-            await this.driver.dismissCompletion();
-            return {
-              passed: false,
-              reason: `Completion list should NOT contain "${excluded}" but it does. Got: [${lastItems.slice(0, 15).join(", ")}${lastItems.length > 15 ? "..." : ""}]`,
-            };
-          }
-        }
-      }
-
-      // All conditions passed
+      const excludeFailure = this.findExcludeFailure(lastItems, vc.excludes);
       await this.driver.dismissCompletion();
-      return { passed: true };
+      return excludeFailure ?? { passed: true };
     }
 
     // Timeout — read final state for error message
-    const visible = await this.driver.isCompletionVisible();
-    if (!visible) {
-      // Try one last trigger
+    if (!(await this.driver.isCompletionVisible())) {
       lastItems = await this.driver.triggerCompletion();
       await this.driver.wait(2);
       lastItems = await this.driver.readCompletionItems();
@@ -269,32 +230,41 @@ export class StepVerifier {
       return { passed: false, reason: "Expected non-empty completion list, got empty" };
     }
     if (vc.contains) {
-      for (const expected of vc.contains) {
-        const found = lastItems.some((item) =>
-          item.toLowerCase().includes(expected.toLowerCase())
-        );
-        if (!found) {
-          return {
-            passed: false,
-            reason: `Completion list missing "${expected}". Got: [${lastItems.slice(0, 10).join(", ")}${lastItems.length > 10 ? "..." : ""}]`,
-          };
-        }
+      const missing = vc.contains.find((expected) => !this.matchesAny(lastItems, expected));
+      if (missing !== undefined) {
+        return {
+          passed: false,
+          reason: `Completion list missing "${missing}". Got: ${this.previewItems(lastItems, 10)}`,
+        };
       }
     }
-    if (vc.excludes) {
-      for (const excluded of vc.excludes) {
-        const found = lastItems.some((item) =>
-          item.toLowerCase().includes(excluded.toLowerCase())
-        );
-        if (found) {
-          return {
-            passed: false,
-            reason: `Completion list should NOT contain "${excluded}" but it does. Got: [${lastItems.slice(0, 15).join(", ")}${lastItems.length > 15 ? "..." : ""}]`,
-          };
-        }
-      }
-    }
-    return { passed: true };
+    return this.findExcludeFailure(lastItems, vc.excludes) ?? { passed: true };
+  }
+
+  // ─── Completion helpers ────────────────────────────────
+
+  private matchesAny(items: string[], expected: string): boolean {
+    const needle = expected.toLowerCase();
+    return items.some((item) => item.toLowerCase().includes(needle));
+  }
+
+  private containsAll(items: string[], expected: string[]): boolean {
+    return expected.every((e) => this.matchesAny(items, e));
+  }
+
+  private findExcludeFailure(items: string[], excludes: string[] | undefined): VerifyResult | null {
+    if (!excludes) return null;
+    const offending = excludes.find((excluded) => this.matchesAny(items, excluded));
+    if (offending === undefined) return null;
+    return {
+      passed: false,
+      reason: `Completion list should NOT contain "${offending}" but it does. Got: ${this.previewItems(items, 15)}`,
+    };
+  }
+
+  private previewItems(items: string[], limit: number): string {
+    const head = items.slice(0, limit).join(", ");
+    return `[${head}${items.length > limit ? "..." : ""}]`;
   }
 
   private async verifyQuickInput(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
@@ -351,12 +321,12 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyTreeItemCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyTreeItemCheck(step: TestStep): Promise<VerifyResult | null> {
     if (!step.verifyTreeItem) return null;
 
     const expectVisible = step.verifyTreeItem.visible !== false; // default true
     const exact = step.verifyTreeItem.exact ?? false;
-    const timeoutMs = (step.timeout ?? 15) * 1000;
+    const timeoutMs = (step.timeout ?? DEFAULT_TREE_ITEM_TIMEOUT_S) * 1000;
 
     if (expectVisible) {
       const found = await this.driver.waitForTreeItem(step.verifyTreeItem.name, timeoutMs, exact);
@@ -372,10 +342,10 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyEditorTabCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyEditorTabCheck(step: TestStep): Promise<VerifyResult | null> {
     if (!step.verifyEditorTab) return null;
 
-    const timeoutMs = (step.timeout ?? 15) * 1000;
+    const timeoutMs = (step.timeout ?? DEFAULT_TREE_ITEM_TIMEOUT_S) * 1000;
     const found = await this.driver.waitForEditorTab(step.verifyEditorTab.title, timeoutMs);
     if (!found) {
       return { passed: false, reason: `Editor tab "${step.verifyEditorTab.title}" did not appear within ${timeoutMs / 1000}s` };
@@ -398,30 +368,31 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyTerminalCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyTerminalCheck(step: TestStep): Promise<VerifyResult | null> {
     if (!step.verifyTerminal) return null;
 
     const { contains, notContains } = step.verifyTerminal;
-    const maxWait = (step.timeout ?? 30) * 1000;
-    const pollInterval = 1000;
-    const deadline = Date.now() + maxWait;
     let text = "";
 
-    while (Date.now() < deadline) {
-      text = await this.driver.getTerminalText();
-      const containsOk = !contains || text.includes(contains);
-      const notContainsOk = !notContains || !text.includes(notContains);
-      if (containsOk && notContainsOk) return { passed: true };
-      await this.driver.wait(pollInterval / 1000);
-    }
-
-    if (contains && !text.includes(contains)) {
-      return { passed: false, reason: `Terminal does not contain: "${contains}". Terminal text: ${text.slice(-1000)}` };
-    }
-    if (notContains && text.includes(notContains)) {
-      return { passed: false, reason: `Terminal unexpectedly contains: "${notContains}"` };
-    }
-    return { passed: true };
+    return pollUntil<VerifyResult>(step, {
+      waitFn: (s) => this.driver.wait(s),
+      check: async () => {
+        text = await this.driver.getTerminalText();
+        const containsOk = !contains || text.includes(contains);
+        const notContainsOk = !notContains || !text.includes(notContains);
+        if (containsOk && notContainsOk) return { done: true, result: { passed: true } };
+        return { done: false };
+      },
+      onTimeout: async () => {
+        if (contains && !text.includes(contains)) {
+          return { passed: false, reason: `Terminal does not contain: "${contains}". Terminal text: ${text.slice(-1000)}` };
+        }
+        if (notContains && text.includes(notContains)) {
+          return { passed: false, reason: `Terminal unexpectedly contains: "${notContains}"` };
+        }
+        return { passed: true };
+      },
+    });
   }
 
 }

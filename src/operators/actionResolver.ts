@@ -6,6 +6,10 @@
  */
 
 import type { VscodeDriver } from "../drivers/vscodeDriver.js";
+import {
+  DEFAULT_LANGUAGE_SERVER_TIMEOUT_MS,
+  DEFAULT_TEST_DISCOVERY_TIMEOUT_MS,
+} from "./defaults.js";
 
 export interface ActionResolverOptions {
   /** Default timeout for waitForLanguageServer (ms) */
@@ -51,7 +55,7 @@ export class ActionResolver {
 
   private buildPatterns(): ActionPattern[] {
     const d = this.driver;
-    const lsTimeout = this.options.lsTimeout ?? 120_000;
+    const lsTimeout = this.options.lsTimeout ?? DEFAULT_LANGUAGE_SERVER_TIMEOUT_MS;
 
     return [
       // ── Command Palette ──
@@ -247,7 +251,7 @@ export class ActionResolver {
       {
         regex: /^waitForTestDiscovery\s+(.+?)(?:\s+(\d+)s)?$/i,
         handler: async (m) => {
-          const timeoutMs = m[2] ? parseInt(m[2], 10) * 1000 : 300_000;
+          const timeoutMs = m[2] ? parseInt(m[2], 10) * 1000 : DEFAULT_TEST_DISCOVERY_TIMEOUT_MS;
           const found = await d.waitForTestDiscovery(m[1].trim(), timeoutMs);
           if (!found) throw new Error(`Test item "${m[1].trim()}" not found within timeout`);
         },

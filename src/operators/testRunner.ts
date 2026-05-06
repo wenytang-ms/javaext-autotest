@@ -75,18 +75,9 @@ export class TestRunner {
     let crashed = false;
     let crashReason = "";
 
-    // Prepare output directory — clean stale data from previous runs
-    if (this.outputDir) {
-      if (fs.existsSync(this.outputDir)) {
-        fs.rmSync(this.outputDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(this.outputDir, { recursive: true });
-      fs.mkdirSync(this.screenshotDir!, { recursive: true });
-      console.log(`📂 Output → ${this.outputDir}`);
-    }
+    this.prepareOutputDir();
 
     try {
-      // Clone required repos if specified
       if (this.plan.setup.repos?.length) {
         await this.cloneRepos(this.plan.setup.repos);
       }
@@ -98,16 +89,7 @@ export class TestRunner {
       // Brief wait for UI to settle (not the full setup.timeout — that's for LS steps)
       await this.driver.wait(3);
 
-      for (const step of this.plan.steps) {
-        const result = await this.executeStep(step);
-        results.push(result);
-
-        const icon = result.status === "pass" ? "✅" : result.status === "fail" ? "❌" : "⏭️";
-        console.log(`${icon} [${result.stepId}] ${result.action} (${result.duration}ms)`);
-        if (result.reason) {
-          console.log(`   → ${result.reason}`);
-        }
-      }
+      await this.runSteps(results);
     } catch (e) {
       const errorMsg = (e as Error).message;
       console.error(`\n💥 Fatal error: ${errorMsg}`);
@@ -118,13 +100,7 @@ export class TestRunner {
     }
 
     const endTime = new Date();
-    const summary = {
-      total: results.length,
-      passed: results.filter((r) => r.status === "pass").length,
-      failed: results.filter((r) => r.status === "fail").length,
-      skipped: results.filter((r) => r.status === "skip").length,
-      errors: results.filter((r) => r.status === "error").length,
-    };
+    const summary = this.summarize(results);
 
     // Detect crash: plan has steps but none executed
     if (!crashed && results.length === 0 && this.plan.steps.length > 0) {
@@ -139,13 +115,8 @@ export class TestRunner {
       console.log(`\n📊 Results: ${summary.passed}/${summary.total} passed`);
     }
 
-    // Post-analysis: use LLM to analyze failed/error steps and provide suggestions
-    if (this.llm?.isConfigured() && (summary.failed + summary.errors) > 0 && this.screenshotDir) {
-      console.log(`\n🤖 Analyzing ${summary.failed + summary.errors} failed step(s) with LLM...`);
-      for (const result of results) {
-        if (result.status !== "fail" && result.status !== "error") continue;
-        await this.analyzeFailure(result);
-      }
+    if ((summary.failed + summary.errors) > 0) {
+      await this.analyzeFailedSteps(results);
     }
 
     const report: TestReport = {
@@ -158,14 +129,64 @@ export class TestRunner {
       summary,
     };
 
-    // Save results.json into output directory
-    if (this.outputDir) {
-      const reportPath = path.join(this.outputDir, "results.json");
-      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
-      console.log(`📄 Report → ${reportPath}`);
-    }
-
+    this.writeReport(report);
     return report;
+  }
+
+  /** Clean and create the output / screenshots directory tree. */
+  private prepareOutputDir(): void {
+    if (!this.outputDir) return;
+    if (fs.existsSync(this.outputDir)) {
+      fs.rmSync(this.outputDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(this.outputDir, { recursive: true });
+    fs.mkdirSync(this.screenshotDir!, { recursive: true });
+    console.log(`📂 Output → ${this.outputDir}`);
+  }
+
+  /** Execute every step in the plan, appending results in place. */
+  private async runSteps(results: StepResult[]): Promise<void> {
+    for (const step of this.plan.steps) {
+      const result = await this.executeStep(step);
+      results.push(result);
+
+      const icon = result.status === "pass" ? "✅" : result.status === "fail" ? "❌" : "⏭️";
+      console.log(`${icon} [${result.stepId}] ${result.action} (${result.duration}ms)`);
+      if (result.reason) {
+        console.log(`   → ${result.reason}`);
+      }
+    }
+  }
+
+  /** Aggregate per-step results into the summary structure. */
+  private summarize(results: StepResult[]): TestReport["summary"] {
+    return {
+      total: results.length,
+      passed: results.filter((r) => r.status === "pass").length,
+      failed: results.filter((r) => r.status === "fail").length,
+      skipped: results.filter((r) => r.status === "skip").length,
+      errors: results.filter((r) => r.status === "error").length,
+    };
+  }
+
+  /** Run LLM post-failure analysis for any failed/errored steps (best-effort). */
+  private async analyzeFailedSteps(results: StepResult[]): Promise<void> {
+    if (!this.llm?.isConfigured() || !this.screenshotDir) return;
+    const failing = results.filter((r) => r.status === "fail" || r.status === "error");
+    if (failing.length === 0) return;
+
+    console.log(`\n🤖 Analyzing ${failing.length} failed step(s) with LLM...`);
+    for (const result of failing) {
+      await this.analyzeFailure(result);
+    }
+  }
+
+  /** Persist `results.json` next to the screenshots directory. */
+  private writeReport(report: TestReport): void {
+    if (!this.outputDir) return;
+    const reportPath = path.join(this.outputDir, "results.json");
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    console.log(`📄 Report → ${reportPath}`);
   }
 
   private async executeStep(step: TestStep): Promise<StepResult> {
