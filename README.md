@@ -314,13 +314,14 @@ autotest/
 │   ├── drivers/
 │   │   ├── vscodeDriver.ts    # VS Code lifecycle, workspace isolation, shared Driver state
 │   │   └── operations/         # Function-specific Driver operation mixins
+│   │       ├── _shared.ts          # Shared selectors, key constants, helpers
 │   │       ├── commandOperations.ts
 │   │       ├── debugOperations.ts
-│   │       ├── dependencyOperations.ts
 │   │       ├── dialogOperations.ts
+│   │       ├── editorOperations.ts
 │   │       ├── fileExplorerOperations.ts
 │   │       ├── hoverOperations.ts
-│   │       ├── javaOperations.ts
+│   │       ├── languageServerOperations.ts
 │   │       ├── quickInputOperations.ts
 │   │       ├── snapshotOperations.ts
 │   │       ├── testRunnerOperations.ts

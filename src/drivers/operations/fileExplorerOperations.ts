@@ -1,7 +1,5 @@
 import type { Page } from "@playwright/test";
-
-const DEFAULT_TIMEOUT = 5000;
-const ENTER_KEY = "Enter";
+import { DEFAULT_TIMEOUT, KEYS } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
@@ -43,7 +41,8 @@ export const fileExplorerOperations: FileExplorerOperations = {
     const input = page.locator(".explorer-viewlet .monaco-inputbox input").first();
     await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await input.fill(fileName);
-    await page.keyboard.press(ENTER_KEY);
+    await page.keyboard.press(KEYS.ENTER);
     await page.waitForTimeout(1000);
   },
 };
+

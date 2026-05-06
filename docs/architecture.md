@@ -51,13 +51,14 @@ src/
 ├── drivers/
 │   ├── vscodeDriver.ts
 │   └── operations/
+│       ├── _shared.ts
 │       ├── commandOperations.ts
 │       ├── debugOperations.ts
-│       ├── dependencyOperations.ts
 │       ├── dialogOperations.ts
+│       ├── editorOperations.ts
 │       ├── fileExplorerOperations.ts
 │       ├── hoverOperations.ts
-│       ├── javaOperations.ts
+│       ├── languageServerOperations.ts
 │       ├── quickInputOperations.ts
 │       ├── snapshotOperations.ts
 │       ├── testRunnerOperations.ts
@@ -117,11 +118,11 @@ Feature-specific Driver methods live in operation modules under `src/drivers/ope
 export interface VscodeDriver
   extends CommandOperations,
     DebugOperations,
-    DependencyOperations,
     DialogOperations,
+    EditorOperations,
     FileExplorerOperations,
     HoverOperations,
-    JavaOperations,
+    LanguageServerOperations,
     QuickInputOperations,
     SnapshotOperations,
     TestRunnerOperations,
@@ -132,11 +133,11 @@ Object.assign(
   VscodeDriver.prototype,
   commandOperations,
   debugOperations,
-  dependencyOperations,
   dialogOperations,
+  editorOperations,
   fileExplorerOperations,
   hoverOperations,
-  javaOperations,
+  languageServerOperations,
   quickInputOperations,
   snapshotOperations,
   testRunnerOperations,

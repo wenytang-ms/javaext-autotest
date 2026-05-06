@@ -2,8 +2,6 @@ import type { Page } from "@playwright/test";
 import * as fs from "node:fs";
 import type { A11yNode } from "../../types.js";
 
-const DEFAULT_TIMEOUT = 5000;
-
 interface DriverContext {
   getPage(): Page;
 }
@@ -12,8 +10,6 @@ export interface SnapshotOperations {
   snapshot(): Promise<A11yNode>;
   domSnapshot(): Promise<string>;
   screenshot(outputPath?: string): Promise<Buffer>;
-  clickByRole(role: string, name: string): Promise<void>;
-  clickByText(text: string): Promise<void>;
 }
 
 export const snapshotOperations: SnapshotOperations = {
@@ -35,19 +31,5 @@ export const snapshotOperations: SnapshotOperations = {
       fs.writeFileSync(outputPath, buffer);
     }
     return buffer;
-  },
-
-  async clickByRole(this: DriverContext, role: string, name: string): Promise<void> {
-    const page = this.getPage();
-    const el = page.getByRole(role as any, { name });
-    await el.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await el.click();
-  },
-
-  async clickByText(this: DriverContext, text: string): Promise<void> {
-    const page = this.getPage();
-    const el = page.getByText(text).first();
-    await el.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await el.click();
   },
 };

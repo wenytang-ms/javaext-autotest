@@ -287,7 +287,9 @@ export class ActionResolver {
       // ── Dependency tree ──
       {
         regex: /^openDependencyExplorer$/i,
-        handler: async () => { await d.openDependencyExplorer(); },
+        handler: async () => {
+          await d.runCommandFromPalette("Java: Focus on Java Dependencies View");
+        },
       },
 
       // ── Quick Input ──

@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { getModifierKey } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
@@ -145,7 +146,7 @@ export const debugOperations: DebugOperations = {
       await outputTab.click({ timeout: 3000 });
       await page.waitForTimeout(400);
     } catch {
-      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      const modifier = getModifierKey();
       await page.keyboard.press(`${modifier}+Shift+U`);
       await page.waitForTimeout(400);
     }

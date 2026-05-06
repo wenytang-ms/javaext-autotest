@@ -16,26 +16,18 @@ import * as path from "node:path";
 import type { VscodeDriverOptions } from "../types.js";
 import { commandOperations, type CommandOperations } from "./operations/commandOperations.js";
 import { debugOperations, type DebugOperations } from "./operations/debugOperations.js";
-import { dependencyOperations, type DependencyOperations } from "./operations/dependencyOperations.js";
+
 import { dialogOperations, type DialogOperations } from "./operations/dialogOperations.js";
 import { fileExplorerOperations, type FileExplorerOperations } from "./operations/fileExplorerOperations.js";
+import { editorOperations, type EditorOperations } from "./operations/editorOperations.js";
 import { hoverOperations, type HoverOperations } from "./operations/hoverOperations.js";
-import { javaOperations, type JavaOperations } from "./operations/javaOperations.js";
+import { languageServerOperations, type LanguageServerOperations } from "./operations/languageServerOperations.js";
 import { quickInputOperations, type QuickInputOperations } from "./operations/quickInputOperations.js";
 import { snapshotOperations, type SnapshotOperations } from "./operations/snapshotOperations.js";
 import { testRunnerOperations, type TestRunnerOperations } from "./operations/testRunnerOperations.js";
 import { treeOperations, type TreeOperations } from "./operations/treeOperations.js";
 import { verificationOperations, type VerificationOperations } from "./operations/verificationOperations.js";
 
-const DEFAULT_TIMEOUT = 5000;
-const COMMAND_PALETTE_KEY = "F1";
-const ENTER_KEY = "Enter";
-const CODE_ACTION_KEY = "Control+.";
-const TRIGGER_SUGGEST_KEY = "Control+Space";
-const NEXT_MARKER_COMMAND = "Go to Next Problem (Error, Warning, Info)";
-const QUICK_INPUT_SELECTOR = ".quick-input-box input";
-const QUICK_INPUT_WIDGET_SELECTOR = ".quick-input-widget";
-const SUGGEST_WIDGET_SELECTOR = ".editor-widget.suggest-widget";
 const WORKBENCH_SELECTOR = ".monaco-workbench";
 
 export class VscodeDriver {
@@ -573,11 +565,11 @@ export class VscodeDriver {
 export interface VscodeDriver
   extends CommandOperations,
     DebugOperations,
-    DependencyOperations,
     DialogOperations,
+    EditorOperations,
     FileExplorerOperations,
     HoverOperations,
-    JavaOperations,
+    LanguageServerOperations,
     QuickInputOperations,
     SnapshotOperations,
     TestRunnerOperations,
@@ -588,11 +580,11 @@ Object.assign(
   VscodeDriver.prototype,
   commandOperations,
   debugOperations,
-  dependencyOperations,
   dialogOperations,
+  editorOperations,
   fileExplorerOperations,
   hoverOperations,
-  javaOperations,
+  languageServerOperations,
   quickInputOperations,
   snapshotOperations,
   testRunnerOperations,

@@ -1,10 +1,5 @@
 import type { Page } from "@playwright/test";
-
-const DEFAULT_TIMEOUT = 5000;
-const COMMAND_PALETTE_KEY = "F1";
-const ENTER_KEY = "Enter";
-const QUICK_INPUT_SELECTOR = ".quick-input-box input";
-const QUICK_INPUT_WIDGET_SELECTOR = ".quick-input-widget";
+import { DEFAULT_TIMEOUT, KEYS, SELECTORS, getModifierKey } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
@@ -26,27 +21,28 @@ export interface CommandOperations {
   executeVSCodeCommand(commandId: string, ...args: unknown[]): Promise<void>;
   runInTerminal(command: string): Promise<void>;
   getTerminalText(): Promise<string>;
+  wait(seconds: number): Promise<void>;
 }
 
 export const commandOperations: CommandOperations = {
   async runCommandFromPalette(this: DriverContext, label: string): Promise<void> {
     const page = this.getPage();
-    await page.keyboard.press(COMMAND_PALETTE_KEY);
+    await page.keyboard.press(KEYS.COMMAND_PALETTE);
 
-    const palette = page.locator(QUICK_INPUT_SELECTOR);
+    const palette = page.locator(SELECTORS.QUICK_INPUT);
     await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await palette.fill(`>${label}`);
     await page.waitForTimeout(300);
 
-    await page.keyboard.press(ENTER_KEY);
-    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await page.keyboard.press(KEYS.ENTER);
+    await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
 
   async selectAndRunCommand(this: DriverContext, label: string): Promise<void> {
     const page = this.getPage();
-    await page.keyboard.press(COMMAND_PALETTE_KEY);
+    await page.keyboard.press(KEYS.COMMAND_PALETTE);
 
-    const palette = page.locator(QUICK_INPUT_SELECTOR);
+    const palette = page.locator(SELECTORS.QUICK_INPUT);
     await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await palette.fill(`>${label}`);
     await page.waitForTimeout(500);
@@ -54,7 +50,7 @@ export const commandOperations: CommandOperations = {
     const option = page.getByRole("option", { name: label }).locator("a");
     await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await option.click();
-    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
 
   async pressKey(this: DriverContext, key: string): Promise<void> {
@@ -74,26 +70,26 @@ export const commandOperations: CommandOperations = {
 
   async openFile(this: DriverContext, filePath: string): Promise<void> {
     const page = this.getPage();
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const modifier = getModifierKey();
     const maxAttempts = 5;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       await page.keyboard.press(`${modifier}+P`);
 
-      const input = page.locator(QUICK_INPUT_SELECTOR);
+      const input = page.locator(SELECTORS.QUICK_INPUT);
       await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
       await input.fill(filePath);
       await page.waitForTimeout(500);
 
-      const hasResults = await page.locator(".quick-input-list .monaco-list-row").count() > 0;
+      const hasResults = await page.locator(`.quick-input-list ${SELECTORS.MONACO_LIST_ROW}`).count() > 0;
       if (hasResults) {
-        await page.keyboard.press(ENTER_KEY);
-        await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+        await page.keyboard.press(KEYS.ENTER);
+        await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
         return;
       }
 
-      await page.keyboard.press("Escape");
-      await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+      await page.keyboard.press(KEYS.ESCAPE);
+      await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
 
       if (attempt < maxAttempts - 1) {
         console.log(`   ⏳ Quick Open: no results for "${filePath}", retrying (${attempt + 1}/${maxAttempts})...`);
@@ -126,20 +122,20 @@ export const commandOperations: CommandOperations = {
 
   async saveFile(this: DriverContext): Promise<void> {
     const page = this.getPage();
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const modifier = getModifierKey();
     await page.keyboard.press(`${modifier}+S`);
     await page.waitForTimeout(500);
   },
 
   async goToLine(this: DriverContext, line: number): Promise<void> {
     const page = this.getPage();
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const modifier = getModifierKey();
     await page.keyboard.press(`${modifier}+G`);
-    const input = page.locator(QUICK_INPUT_SELECTOR);
+    const input = page.locator(SELECTORS.QUICK_INPUT);
     await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await input.fill(`:${line}`);
-    await page.keyboard.press(ENTER_KEY);
-    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await page.keyboard.press(KEYS.ENTER);
+    await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
 
   async goToEndOfLine(this: DriverContext): Promise<void> {
@@ -172,7 +168,7 @@ export const commandOperations: CommandOperations = {
     const page = this.getPage();
     await page.locator(".terminal-wrapper").first().waitFor({ state: "visible", timeout: 10_000 }).catch(() => {});
     await page.keyboard.type(command);
-    await page.keyboard.press(ENTER_KEY);
+    await page.keyboard.press(KEYS.ENTER);
     await page.waitForTimeout(1000);
   },
 
@@ -205,5 +201,9 @@ export const commandOperations: CommandOperations = {
     }).catch(() => []);
     const raw = [...texts, ...buffers].join("\n--- terminal ---\n");
     return raw.replace(/\u00A0/g, " ");
+  },
+
+  async wait(this: DriverContext, seconds: number): Promise<void> {
+    await this.getPage().waitForTimeout(seconds * 1000);
   },
 };

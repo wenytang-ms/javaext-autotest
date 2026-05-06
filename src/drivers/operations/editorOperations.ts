@@ -1,31 +1,22 @@
 import type { Page } from "@playwright/test";
+import { DEFAULT_TIMEOUT, KEYS, SELECTORS, dismissWidget, getModifierKey } from "./_shared.js";
 
-const DEFAULT_TIMEOUT = 5000;
-const ENTER_KEY = "Enter";
-const TRIGGER_SUGGEST_KEY = "Control+Space";
 const NEXT_MARKER_COMMAND = "Go to Next Problem (Error, Warning, Info)";
-const QUICK_INPUT_SELECTOR = ".quick-input-box input";
-const QUICK_INPUT_WIDGET_SELECTOR = ".quick-input-widget";
-const SUGGEST_WIDGET_SELECTOR = ".editor-widget.suggest-widget";
 
 interface DriverContext {
   getPage(): Page;
   runCommandFromPalette(label: string): Promise<void>;
   goToLine(line: number): Promise<void>;
   goToEndOfLine(): Promise<void>;
-  selectAllInEditor(): Promise<void>;
   triggerCompletion(): Promise<string[]>;
   readCompletionItems(): Promise<string[]>;
 }
 
-export interface JavaOperations {
+export interface EditorOperations {
   typeInEditor(text: string): Promise<void>;
-  selectAllInEditor(): Promise<void>;
   setEditorContent(content: string): Promise<void>;
   typeAndTriggerSnippet(triggerWord: string): Promise<void>;
-  waitForLanguageServer(timeoutMs?: number): Promise<boolean>;
   getProblemsCount(): Promise<{ errors: number; warnings: number }>;
-  navigateToNextError(): Promise<void>;
   navigateToError(index: number): Promise<void>;
   applyCodeAction(label: string): Promise<void>;
   findText(text: string): Promise<void>;
@@ -38,7 +29,7 @@ export interface JavaOperations {
   dismissCompletion(): Promise<void>;
 }
 
-export const javaOperations: JavaOperations = {
+export const editorOperations: EditorOperations = {
   async typeInEditor(this: DriverContext, text: string): Promise<void> {
     const page = this.getPage();
     await page.keyboard.press("Escape");
@@ -84,15 +75,10 @@ export const javaOperations: JavaOperations = {
     await page.keyboard.press("Escape");
   },
 
-  async selectAllInEditor(this: DriverContext): Promise<void> {
-    const page = this.getPage();
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await page.keyboard.press(`${modifier}+A`);
-  },
-
   async setEditorContent(this: DriverContext, content: string): Promise<void> {
-    await this.selectAllInEditor();
     const page = this.getPage();
+    const modifier = getModifierKey();
+    await page.keyboard.press(`${modifier}+A`);
     await page.keyboard.press("Delete");
     await page.keyboard.type(content, { delay: 10 });
   },
@@ -105,7 +91,7 @@ export const javaOperations: JavaOperations = {
 
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) {
-        const modifier = process.platform === "darwin" ? "Meta" : "Control";
+        const modifier = getModifierKey();
         await page.keyboard.press(`${modifier}+A`);
         await page.keyboard.press("Delete");
         await page.waitForTimeout(500);
@@ -114,78 +100,37 @@ export const javaOperations: JavaOperations = {
 
       await page.keyboard.type(triggerWord, { delay: 50 });
       await page.waitForTimeout(300);
-      await page.keyboard.press(TRIGGER_SUGGEST_KEY);
-      const suggestVisible = await page.locator(SUGGEST_WIDGET_SELECTOR)
+      await page.keyboard.press(KEYS.TRIGGER_SUGGEST);
+      const suggestVisible = await page.locator(SELECTORS.SUGGEST_WIDGET)
         .waitFor({ state: "visible", timeout: 5000 })
         .then(() => true).catch(() => false);
 
       if (!suggestVisible) continue;
       await page.waitForTimeout(500);
 
-      const snippetOption = page.locator(".monaco-list-row .suggest-icon.codicon-symbol-snippet").first();
+      const snippetOption = page.locator(`${SELECTORS.MONACO_LIST_ROW} .suggest-icon.codicon-symbol-snippet`).first();
       const hasSnippet = await snippetOption.isVisible().catch(() => false);
 
       if (hasSnippet) {
         await snippetOption.click();
-        await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+        await page.locator(SELECTORS.SUGGEST_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
         return;
       }
 
-      await page.keyboard.press("Escape");
-      await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+      await dismissWidget(page, SELECTORS.SUGGEST_WIDGET);
     }
 
     console.log("   ⏳ Snippet not found in suggest, using Insert Snippet command...");
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const modifier = getModifierKey();
     await page.keyboard.press(`${modifier}+A`);
     await page.keyboard.press("Delete");
     await this.runCommandFromPalette("Snippets: Insert Snippet");
-    const snippetPicker = page.locator(QUICK_INPUT_SELECTOR);
+    const snippetPicker = page.locator(SELECTORS.QUICK_INPUT);
     await snippetPicker.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await snippetPicker.fill(triggerWord);
     await page.waitForTimeout(500);
-    await page.keyboard.press(ENTER_KEY);
-    await page.locator(QUICK_INPUT_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
-  },
-
-  async waitForLanguageServer(this: DriverContext, timeoutMs = 120_000): Promise<boolean> {
-    const page = this.getPage();
-    const start = Date.now();
-    const pollInterval = 2000;
-
-    console.log(`   ⏳ Waiting for Language Server (timeout: ${timeoutMs / 1000}s)...`);
-
-    let lastStatus = "";
-    while (Date.now() - start < timeoutMs) {
-      const statusItems = page.locator("footer a, footer [role='button']");
-      const count = await statusItems.count();
-      let currentStatus = "";
-
-      for (let i = 0; i < count; i++) {
-        const text = (await statusItems.nth(i).textContent().catch(() => ""))?.trim() ?? "";
-        if (/^Java:/.test(text) || /^☕/.test(text)) {
-          currentStatus = text;
-          break;
-        }
-      }
-
-      if (currentStatus && currentStatus !== lastStatus) {
-        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-        console.log(`   ⏳ ${elapsed}s — "${currentStatus}"`);
-        lastStatus = currentStatus;
-      }
-
-      if (/Java:\s*Ready/i.test(currentStatus) || currentStatus.includes("👍")) {
-        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-        console.log(`   ✅ Language Server ready (${elapsed}s)`);
-        return true;
-      }
-
-      await page.waitForTimeout(pollInterval);
-    }
-
-    console.log(`   ⚠️ Language Server not ready after ${timeoutMs / 1000}s (last: "${lastStatus}")`);
-    return false;
+    await page.keyboard.press(KEYS.ENTER);
+    await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
 
   async getProblemsCount(this: DriverContext): Promise<{ errors: number; warnings: number }> {
@@ -226,16 +171,12 @@ export const javaOperations: JavaOperations = {
     return result ?? { errors: -1, warnings: -1 };
   },
 
-  async navigateToNextError(this: DriverContext): Promise<void> {
-    await this.runCommandFromPalette(NEXT_MARKER_COMMAND);
-  },
-
   async navigateToError(this: DriverContext, index: number): Promise<void> {
     const page = this.getPage();
     await this.runCommandFromPalette("View: Focus Problems (Errors, Warnings, Infos)");
     await page.waitForTimeout(500);
 
-    const errorRows = page.locator(".markers-panel .monaco-list-row .codicon-error");
+    const errorRows = page.locator(`.markers-panel ${SELECTORS.MONACO_LIST_ROW} .codicon-error`);
     const count = await errorRows.count();
 
     if (count >= index) {
@@ -253,7 +194,7 @@ export const javaOperations: JavaOperations = {
 
   async applyCodeAction(this: DriverContext, label: string): Promise<void> {
     const page = this.getPage();
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const modifier = getModifierKey();
 
     await page.keyboard.press(`${modifier}+1`);
     await page.waitForTimeout(500);
@@ -291,21 +232,20 @@ export const javaOperations: JavaOperations = {
       return;
     }
 
-    await page.keyboard.press("Escape");
+    await page.keyboard.press(KEYS.ESCAPE);
     const available = result.labels.length > 0 ? result.labels.join(", ") : "none";
     throw new Error(`Code action "${label}" not found. Available actions: ${available}`);
   },
 
   async findText(this: DriverContext, text: string): Promise<void> {
     const page = this.getPage();
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const modifier = getModifierKey();
     await page.keyboard.press(`${modifier}+F`);
     const findInput = page.locator(".find-part .input");
     await findInput.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await findInput.fill(text);
     await page.waitForTimeout(500);
-    await page.keyboard.press("Escape");
-    await page.locator(".find-part").waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await dismissWidget(page, ".find-part");
     await page.waitForTimeout(300);
   },
 
@@ -316,7 +256,7 @@ export const javaOperations: JavaOperations = {
     await renameInput.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await renameInput.fill(newName);
     await page.waitForTimeout(300);
-    await page.keyboard.press(ENTER_KEY);
+    await page.keyboard.press(KEYS.ENTER);
     await page.waitForTimeout(1000);
   },
 
@@ -324,18 +264,18 @@ export const javaOperations: JavaOperations = {
     const page = this.getPage();
     await page.keyboard.press("Shift+Alt+O");
     await page.waitForTimeout(1000);
-    const quickPick = page.locator(QUICK_INPUT_WIDGET_SELECTOR);
+    const quickPick = page.locator(SELECTORS.QUICK_INPUT_WIDGET);
     const hasQuickPick = await quickPick.isVisible().catch(() => false);
     if (hasQuickPick) {
-      await page.keyboard.press(ENTER_KEY);
+      await page.keyboard.press(KEYS.ENTER);
       await quickPick.waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
     }
   },
 
   async triggerCompletion(this: DriverContext): Promise<string[]> {
     const page = this.getPage();
-    await page.keyboard.press(TRIGGER_SUGGEST_KEY);
-    await page.locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await page.keyboard.press(KEYS.TRIGGER_SUGGEST);
+    await page.locator(SELECTORS.SUGGEST_WIDGET).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT }).catch(() => {});
     return this.readCompletionItems();
   },
 
@@ -407,18 +347,17 @@ export const javaOperations: JavaOperations = {
   },
 
   async isCompletionVisible(this: DriverContext): Promise<boolean> {
-    return this.getPage().locator(SUGGEST_WIDGET_SELECTOR).isVisible().catch(() => false);
+    return this.getPage().locator(SELECTORS.SUGGEST_WIDGET).isVisible().catch(() => false);
   },
 
   async readCompletionItems(this: DriverContext): Promise<string[]> {
     const page = this.getPage();
-    return await page.locator(SUGGEST_WIDGET_SELECTOR)
-      .locator(".monaco-list-row .label-name")
+    return await page.locator(SELECTORS.SUGGEST_WIDGET)
+      .locator(`${SELECTORS.MONACO_LIST_ROW} .label-name`)
       .allTextContents().catch(() => [] as string[]);
   },
 
   async dismissCompletion(this: DriverContext): Promise<void> {
-    await this.getPage().keyboard.press("Escape");
-    await this.getPage().locator(SUGGEST_WIDGET_SELECTOR).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await dismissWidget(this.getPage(), SELECTORS.SUGGEST_WIDGET);
   },
 };

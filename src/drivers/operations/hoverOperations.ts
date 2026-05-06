@@ -1,6 +1,5 @@
 import type { Page } from "@playwright/test";
-
-const DEFAULT_TIMEOUT = 5000;
+import { DEFAULT_TIMEOUT, dismissWidget } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
@@ -43,7 +42,6 @@ export const hoverOperations: HoverOperations = {
   },
 
   async dismissHover(this: DriverContext): Promise<void> {
-    await this.getPage().keyboard.press("Escape");
-    await this.getPage().locator(".monaco-hover").waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+    await dismissWidget(this.getPage(), ".monaco-hover");
   },
 };

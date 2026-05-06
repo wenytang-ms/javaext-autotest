@@ -1,6 +1,5 @@
 import type { Page } from "@playwright/test";
-
-const DEFAULT_TIMEOUT = 5000;
+import { DEFAULT_TIMEOUT } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
