@@ -1,7 +1,13 @@
 import type { Page } from "@playwright/test";
 import { DEFAULT_TIMEOUT, KEYS, SELECTORS, dismissWidget, getModifierKey } from "./_shared.js";
 
-const NEXT_MARKER_COMMAND = "Go to Next Problem (Error, Warning, Info)";
+/**
+ * Maximum time to wait for at least the requested number of errors to be
+ * published by the language server. Diagnostics are emitted asynchronously
+ * after edits, so an error inserted just before `navigateToError` may not
+ * be visible immediately.
+ */
+const NAVIGATE_TO_ERROR_TIMEOUT_MS = 30_000;
 
 interface DriverContext {
   getPage(): Page;
@@ -177,20 +183,33 @@ export const editorOperations: EditorOperations = {
     await this.runCommandFromPalette("View: Focus Problems (Errors, Warnings, Infos)");
     await page.waitForTimeout(500);
 
+    // Poll the Problems panel for at least `index` errors. Diagnostics are
+    // published asynchronously by the language server, so we cannot assume
+    // they are visible immediately after edits. Falling back to the generic
+    // "Go to Next Problem" command would silently navigate to warnings,
+    // hiding the timing issue and producing confusing downstream failures.
     const errorRows = page.locator(`.markers-panel ${SELECTORS.MONACO_LIST_ROW} .codicon-error`);
-    const count = await errorRows.count();
-
-    if (count >= index) {
-      const targetRow = errorRows.nth(index - 1).locator("..").locator("..");
-      await targetRow.click();
-      await page.waitForTimeout(500);
-      await targetRow.dblclick();
+    const deadline = Date.now() + NAVIGATE_TO_ERROR_TIMEOUT_MS;
+    let count = await errorRows.count();
+    while (count < index && Date.now() < deadline) {
       await page.waitForTimeout(1000);
-    } else {
-      for (let i = 0; i < index; i++) {
-        await this.runCommandFromPalette(NEXT_MARKER_COMMAND);
-      }
+      count = await errorRows.count();
     }
+
+    if (count < index) {
+      throw new Error(
+        `navigateToError: only ${count} error(s) appeared in the Problems panel ` +
+        `after ${NAVIGATE_TO_ERROR_TIMEOUT_MS / 1000}s, expected at least ${index}. ` +
+        `The language server may not have published diagnostics yet — consider ` +
+        `adding a longer waitBefore or an explicit waitForLanguageServer step.`
+      );
+    }
+
+    const targetRow = errorRows.nth(index - 1).locator("..").locator("..");
+    await targetRow.click();
+    await page.waitForTimeout(500);
+    await targetRow.dblclick();
+    await page.waitForTimeout(1000);
   },
 
   async applyCodeAction(this: DriverContext, label: string): Promise<void> {
