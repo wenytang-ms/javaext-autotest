@@ -21,6 +21,7 @@ export interface TreeOperations {
   waitForTreeItem(name: string, timeoutMs?: number, exact?: boolean): Promise<boolean>;
   waitForTreeItemGone(name: string, timeoutMs?: number, exact?: boolean): Promise<boolean>;
   clickTreeItemAction(itemName: string, actionLabel: string): Promise<void>;
+  clickViewTitleAction(viewName: string, actionLabel: string): Promise<void>;
   waitForEditorTab(title: string, timeoutMs?: number): Promise<boolean>;
 }
 
@@ -368,5 +369,65 @@ export const treeOperations: TreeOperations = {
     } catch {
       return false;
     }
+  },
+
+  async clickViewTitleAction(this: DriverContext, viewName: string, actionLabel: string): Promise<void> {
+    const page = this.getPage();
+
+    // Locate the pane whose header title matches viewName (case-insensitive,
+    // tolerant of the workbench's UPPERCASE text-transform).
+    const escapedView = viewName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pane = page.locator(".pane").filter({
+      has: page.locator(`.pane-header .title:text-matches("^\\s*${escapedView}\\s*$", "i")`),
+    }).first();
+    await pane.waitFor({ state: "visible", timeout: 10_000 });
+
+    // Pane-header action buttons are usually only rendered when the header is
+    // hovered or the pane is focused. Hover first to ensure they're in DOM.
+    const header = pane.locator(".pane-header").first();
+    await header.scrollIntoViewIfNeeded().catch(() => { /* best effort */ });
+    await header.hover();
+    await page.waitForTimeout(300);
+
+    // Try clicking a direct (navigation-group) action button first.
+    const directAction = pane.locator(
+      `.pane-header a.action-label[role="button"][aria-label="${actionLabel}"], ` +
+      `.pane-header a.action-label[aria-label="${actionLabel}"]`,
+    ).first();
+    if (await directAction.count() > 0) {
+      try {
+        await directAction.click({ timeout: 2000 });
+        await page.waitForTimeout(500);
+        return;
+      } catch {
+        // Fall through to overflow-menu path.
+      }
+    }
+
+    // Open the "Views and More Actions..." overflow menu.
+    const overflow = pane.locator(
+      `.pane-header a.action-label[role="button"][aria-label*="More Actions"], ` +
+      `.pane-header a.action-label.codicon-toolbar-more, ` +
+      `.pane-header a.codicon-toolbar-more`,
+    ).first();
+    await overflow.waitFor({ state: "visible", timeout: 5000 });
+    await overflow.click();
+    await page.waitForTimeout(300);
+
+    // Click the menu item by label.
+    const menu = page.locator(".monaco-menu-container .monaco-menu, .context-view .monaco-menu").first();
+    await menu.waitFor({ state: "visible", timeout: 5000 });
+    const menuItem = menu.getByRole("menuitem", { name: actionLabel }).first();
+    await menuItem.waitFor({ state: "visible", timeout: 5000 });
+    // Hover first so VS Code marks the item as focused before the click —
+    // this matches how `contextMenuOnTreeItem` drives context menus and avoids
+    // the "click without hover" race that can dismiss the menu without firing.
+    await menuItem.hover();
+    await page.locator(".monaco-menu-container .action-item.focused").waitFor({
+      state: "visible",
+      timeout: DEFAULT_TIMEOUT,
+    }).catch(() => { /* best effort */ });
+    await menuItem.click();
+    await page.waitForTimeout(500);
   },
 };

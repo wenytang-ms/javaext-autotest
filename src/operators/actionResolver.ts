@@ -108,6 +108,13 @@ export class ActionResolver {
         },
       },
       {
+        regex: /^clickViewTitleAction\s+(.+)$/i,
+        handler: async (m) => {
+          const [viewName, actionLabel] = this.parseActionArgs(m[1], 2, "clickViewTitleAction");
+          await d.clickViewTitleAction(viewName, actionLabel);
+        },
+      },
+      {
         regex: /^contextMenu\s+(.+)$/i,
         handler: async (m) => {
           const [itemName, menuLabel] = this.parseActionArgs(m[1], 2, "contextMenu");

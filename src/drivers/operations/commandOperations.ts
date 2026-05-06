@@ -4,6 +4,7 @@ import { DEFAULT_TIMEOUT, KEYS, SELECTORS, getModifierKey } from "./_shared.js";
 interface DriverContext {
   getPage(): Page;
   resolveWorkspacePlaceholders(value: unknown): unknown;
+  assignKeybindingForCommand(commandId: string, args: unknown[]): Promise<string>;
 }
 
 export interface CommandOperations {
@@ -150,17 +151,18 @@ export const commandOperations: CommandOperations = {
 
   async executeVSCodeCommand(this: DriverContext, commandId: string, ...args: unknown[]): Promise<void> {
     const resolvedArgs = args.map(arg => this.resolveWorkspacePlaceholders(arg));
-    await this.getPage().evaluate(
-      async ({ id, commandArgs }) => {
-        const driver = (window as any).driver;
-        if (!driver?.executeCommand) {
-          throw new Error("VS Code smoke test driver executeCommand API is not available.");
-        }
-        await driver.executeCommand(id, ...commandArgs);
-      },
-      { id: commandId, commandArgs: resolvedArgs }
-    );
-    await this.getPage().waitForTimeout(500);
+    // VS Code's smoke-test driver does NOT expose `executeCommand` on `window.driver`
+    // (only typeInEditor, getElements, getTerminalBuffer and a handful of others —
+    // see src/vs/workbench/services/driver/browser/driver.ts upstream). To run a
+    // command by id — including palette-hidden commands ("when": false in the
+    // package.json `commandPalette` menu) — we register the command as a user
+    // keybinding and dispatch the binding via Playwright. Bindings persist in
+    // ${userDataDir}/User/keybindings.json for the session and are pooled, so
+    // repeated calls to the same (commandId, args) reuse the same key.
+    const playwrightKey = await this.assignKeybindingForCommand(commandId, resolvedArgs);
+    const page = this.getPage();
+    await page.keyboard.press(playwrightKey);
+    await page.waitForTimeout(500);
   },
 
   async runInTerminal(this: DriverContext, command: string): Promise<void> {

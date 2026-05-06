@@ -132,7 +132,7 @@ steps:
 |--------|-------------|
 | `run command <Command Name>` | Execute via Command Palette (F1) |
 | `selectCommand <Command Name>` | Open palette, type, click exact match (not Enter) |
-| `executeVSCodeCommand <id> [jsonArg]` | Execute a VS Code command ID directly through the extension host |
+| `executeVSCodeCommand <id> [jsonArg]` | Execute a VS Code command ID via dynamically-allocated user keybinding (works for palette-hidden commands; max 12 unique commands per session) |
 | `pressKey <key>` | Press a keyboard key (e.g. "Enter", "Escape") |
 | `pressTerminalKey <key>` | Focus terminal and press a key |
 | `click <name> tree item` | Single-click tree node (expands/collapses) |
@@ -149,6 +149,7 @@ steps:
 | Action | Description |
 |--------|-------------|
 | `clickTreeItemAction <item> <label>` | Click inline hover button on tree item (e.g. "Run", "New...") |
+| `clickViewTitleAction <view> <label>` | Click an action button in a sidebar view's title bar; falls back to the "Views and More Actions..." overflow menu when the action is not directly visible. Quote args that contain spaces |
 | `contextMenu <item> <menuLabel>` | Right-click tree item → select context menu option; quote args that contain spaces |
 | `openDependencyExplorer` | Open the Java Dependencies view |
 | `createNewFile <folder> <name>` | Create file via Explorer right-click → New File; quote args that contain spaces |
@@ -337,7 +338,18 @@ TreeView inline actions are the buttons shown on the right side of a row, usuall
 
 Use `expandTreeItem` when you need idempotent expansion. Prefer `click <name> tree item` only when toggling is acceptable.
 
-### 17. Tree Item Name Case Sensitivity
+### 17. View Title Bar Actions
+
+Each sidebar view (e.g. "Java Projects", "Maven", "Outline") has a row of action buttons rendered on the right side of its pane header. Some actions are visible directly; the rest are tucked behind the `…` "Views and More Actions..." overflow toggle. Use `clickViewTitleAction <view> <label>` so the driver locates the pane by its title, hovers the header to reveal hidden buttons, and clicks the named action — falling back to the overflow menu automatically:
+
+```yaml
+- action: 'clickViewTitleAction "Java Projects" "Link with Editor"'
+- action: 'clickViewTitleAction "Java Projects" "Unlink with Editor"'
+```
+
+Quote arguments that contain spaces. Both the view name and the action label are matched against the workbench's `aria-label` (case-insensitive on the view name to tolerate the UPPERCASE text-transform applied to pane titles).
+
+### 18. Tree Item Name Case Sensitivity
 
 `getByRole("treeitem", { name })` is **case-insensitive**. If the Explorer has a folder called `INVISIBLE` and Java Projects has a node called `invisible`, they will both match. Be aware of this when working with projects whose names match sidebar section headers.
 
