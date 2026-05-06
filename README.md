@@ -329,7 +329,9 @@ autotest/
 │   │       └── verificationOperations.ts
 │   ├── operators/
 │   │   ├── actionResolver.ts   # Action → Driver calls (50+ regex)
+│   │   ├── defaults.ts         # Shared timeout / poll-interval constants
 │   │   ├── stepVerifier.ts     # Deterministic verification (10+ strategies)
+│   │   ├── verifierUtils.ts    # pollUntil + verify result helpers
 │   │   ├── llmClient.ts        # Azure OpenAI client (failure screenshot analysis)
 │   │   ├── planParser.ts       # YAML test plan parser (paths relative to plan file)
 │   │   └── testRunner.ts       # Orchestrator (launch → execute → screenshot → report)

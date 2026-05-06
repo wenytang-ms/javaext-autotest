@@ -66,10 +66,12 @@ src/
 │       └── verificationOperations.ts
 ├── operators/
 │   ├── actionResolver.ts
+│   ├── defaults.ts
 │   ├── llmClient.ts
 │   ├── planParser.ts
 │   ├── stepVerifier.ts
-│   └── testRunner.ts
+│   ├── testRunner.ts
+│   └── verifierUtils.ts
 ├── types.ts
 └── index.ts
 ```
