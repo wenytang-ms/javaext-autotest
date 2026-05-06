@@ -22,6 +22,8 @@ export interface TestSetup {
   extensions?: string[];
   /** Local VSIX files to install before launch (paths relative to test plan file) */
   vsix?: string[];
+  /** Install pre-release versions of marketplace extensions. Defaults to false (stable). */
+  preRelease?: boolean;
   vscodeVersion?: "stable" | "insiders";
   /** Workspace folder to open. Mutually exclusive with `file`. */
   workspace?: string;
@@ -185,6 +187,8 @@ export interface VscodeDriverOptions {
   extensions?: string[];
   /** Local VSIX file paths to install before launch */
   vsix?: string[];
+  /** Install pre-release versions of marketplace extensions */
+  preRelease?: boolean;
   workspacePath?: string;
   /** Single file to open (no workspace) */
   filePath?: string;

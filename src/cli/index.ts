@@ -92,10 +92,16 @@ program
   .option("--output <dir>", "Output directory (default: ./test-results/<plan-name>)")
   .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install (overrides marketplace versions)")
+  .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields (e.g. --override extensionPath=../../vscode-java extension=redhat.java)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; vsix?: string; override?: string[] }) => {
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     try {
       const plan = loadTestPlan(planPath);
+
+      // Apply --pre-release flag
+      if (opts.preRelease) {
+        plan.setup.preRelease = true;
+      }
 
       // Apply --override key=value pairs to setup fields
       if (opts.override) {
@@ -173,8 +179,9 @@ program
   .option("--no-llm", "Skip LLM analysis")
   .option("--exclude <plans>", "Comma-separated plan names to exclude", "java-fresh-import")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install for all plans")
+  .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields for all plans (e.g. --override extensionPath=../../vscode-java)")
-  .action(async (dir: string, opts: { output?: string; llm?: boolean; exclude?: string; vsix?: string; override?: string[] }) => {
+  .action(async (dir: string, opts: { output?: string; llm?: boolean; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     const { LLMClient } = await import("../operators/llmClient.js");
     const planFiles = fs.readdirSync(dir)
       .filter(f => f.endsWith(".yaml") || f.endsWith(".yml"))
@@ -201,6 +208,11 @@ program
 
       try {
         const plan = loadTestPlan(planPath);
+
+        // Apply --pre-release flag
+        if (opts.preRelease) {
+          plan.setup.preRelease = true;
+        }
 
         // Apply --vsix to each plan
         if (opts.vsix) {

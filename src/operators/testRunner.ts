@@ -47,6 +47,7 @@ export class TestRunner {
         ...(plan.setup.extensions ?? []),
       ],
       vsix: plan.setup.vsix,
+      preRelease: plan.setup.preRelease,
       workspacePath: plan.setup.workspace,
       filePath: plan.setup.file,
       settings: plan.setup.settings,

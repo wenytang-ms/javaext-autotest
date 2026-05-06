@@ -45,6 +45,7 @@ setup:
   extension: "redhat.java"                   # primary extension (auto-installed)
   extensions: ["vscjava.vscode-java-pack"]   # additional marketplace extensions
   vsix: ["../../path/to/local.vsix"]         # local VSIX files (relative to plan)
+  preRelease: true                             # install pre-release marketplace extensions (default: false)
   vscodeVersion: "stable"
   workspace: "../../relative/path/to/project"   # relative to plan file
   # file: "../../path/to/File.java"             # single-file mode (no workspace)
@@ -346,6 +347,7 @@ Use `expandTreeItem` when you need idempotent expansion. Prefer `click <name> tr
 | Option | Description |
 |--------|-------------|
 | `--vsix <paths>` | Comma-separated VSIX files to install |
+| `--pre-release` | Install pre-release versions of marketplace extensions (default: stable) |
 | `--override <kv...>` | Override setup fields (e.g. `--override extensionPath=../../vscode-java`) |
 | `--output <dir>` | Output directory (default: `./test-results/<plan-name>`) |
 | `--no-llm` | Skip LLM verification |
@@ -354,6 +356,7 @@ Use `expandTreeItem` when you need idempotent expansion. Prefer `click <name> tr
 | Option | Description |
 |--------|-------------|
 | `--vsix <paths>` | Comma-separated VSIX files (applied to all plans) |
+| `--pre-release` | Install pre-release versions of marketplace extensions (default: stable) |
 | `--override <kv...>` | Override setup fields for all plans |
 | `--output <dir>` | Output directory (default: `./test-results`) |
 | `--no-llm` | Skip LLM analysis |

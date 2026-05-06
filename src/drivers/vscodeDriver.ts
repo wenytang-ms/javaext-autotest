@@ -123,17 +123,23 @@ export class VscodeDriver {
       ...(this.options.extensions ?? []),
       ...(this.options.vsix ?? []),
     ];
+    const usePreRelease = this.options.preRelease === true; // default false
     if (allExtensions.length > 0) {
-      console.log(`📦 Installing ${allExtensions.length} extension(s)...`);
+      console.log(`📦 Installing ${allExtensions.length} extension(s)${usePreRelease ? " (pre-release)" : " (stable)"}...`);
       for (const ext of allExtensions) {
         const isVsix = ext.endsWith(".vsix");
         console.log(`   ↳ ${ext}${isVsix ? " (vsix)" : ""}`);
+        const installArgs = [
+          ...baseArgs,
+          "--install-extension", ext,
+          "--force",
+        ];
+        // Add --pre-release for marketplace extensions (not VSIX files)
+        if (!isVsix && usePreRelease) {
+          installArgs.push("--pre-release");
+        }
         try {
-          execFileSync(cli, [
-            ...baseArgs,
-            "--install-extension", ext,
-            "--force",
-          ], {
+          execFileSync(cli, installArgs, {
             stdio: "pipe",
             timeout: 120_000,
             env: { ...process.env },
