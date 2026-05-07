@@ -147,7 +147,7 @@ export class TestRunner {
   /** Execute every step in the plan, appending results in place. */
   private async runSteps(results: StepResult[]): Promise<void> {
     for (const step of this.plan.steps) {
-      const result = await this.executeStep(step);
+      const result = await this.executeStepWithRetries(step);
       results.push(result);
 
       const icon = result.status === "pass" ? "✅" : result.status === "fail" ? "❌" : "⏭️";
@@ -156,6 +156,33 @@ export class TestRunner {
         console.log(`   → ${result.reason}`);
       }
     }
+  }
+
+  /**
+   * Run a step, retrying on fail/error up to `step.retries` extra attempts.
+   * Final result reflects the last attempt; `reason` includes attempt count
+   * when retried so flake is visible in reports.
+   */
+  private async executeStepWithRetries(step: TestStep): Promise<StepResult> {
+    const maxAttempts = 1 + Math.max(0, step.retries ?? 0);
+    let last: StepResult | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const result = await this.executeStep(step);
+      if (result.status === "pass" || result.status === "skip") {
+        if (attempt > 1) {
+          console.log(`   ↻ [${step.id}] passed on attempt ${attempt}/${maxAttempts}`);
+        }
+        return result;
+      }
+      last = result;
+      if (attempt < maxAttempts) {
+        console.log(`   ↻ [${step.id}] ${result.status} on attempt ${attempt}/${maxAttempts}; retrying...`);
+      }
+    }
+    if (last && maxAttempts > 1) {
+      last.reason = `${last.reason ?? "step failed"} (after ${maxAttempts} attempts)`;
+    }
+    return last!;
   }
 
   /** Aggregate per-step results into the summary structure. */

@@ -58,6 +58,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       verifyTerminal: step.verifyTerminal as TestStep["verifyTerminal"],
       timeout: step.timeout as number | undefined,
       waitBefore: step.waitBefore as number | undefined,
+      retries: typeof step.retries === "number" ? Math.max(0, step.retries) : undefined,
     };
   });
 
