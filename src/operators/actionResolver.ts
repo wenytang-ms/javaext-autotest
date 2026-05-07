@@ -346,6 +346,10 @@ export class ActionResolver {
         handler: async () => { await d.confirmDialog(); },
       },
       {
+        regex: /^expectConfirmDialog$/i,
+        handler: async () => { await d.expectConfirmDialog(); },
+      },
+      {
         regex: /^tryClickButton\s+(.+)$/i,
         handler: async (m) => { await d.tryClickButton(m[1].trim()); },
       },

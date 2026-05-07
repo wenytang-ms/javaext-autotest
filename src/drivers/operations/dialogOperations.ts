@@ -5,6 +5,32 @@ interface DriverContext {
   clickDialogButton(label: string): Promise<void>;
 }
 
+/**
+ * Wait for a confirmation dialog and click a recognized confirm button.
+ * Throws if the dialog never appears or no button matches.
+ */
+async function clickConfirmButton(page: Page, timeoutMs: number): Promise<void> {
+  const dialog = page.locator(".monaco-dialog-box");
+  await dialog.waitFor({ state: "visible", timeout: timeoutMs });
+
+  const confirmLabels = ["OK", "Delete", "Move to Recycle Bin", "Move to Trash", "Yes", "Continue"];
+  for (const label of confirmLabels) {
+    const btn = dialog.getByRole("button", { name: label });
+    if (await btn.count() > 0) {
+      await btn.first().click();
+      return;
+    }
+  }
+
+  const firstBtn = dialog.locator(".dialog-buttons button").first();
+  if (await firstBtn.count() > 0) {
+    await firstBtn.click();
+    return;
+  }
+
+  throw new Error("Confirmation dialog appeared but no clickable button was found");
+}
+
 export interface DialogOperations {
   isDialogVisible(): Promise<boolean>;
   getDialogMessage(): Promise<string>;
@@ -12,6 +38,7 @@ export interface DialogOperations {
   waitForDialog(timeoutMs?: number): Promise<void>;
   tryClickDialogButton(label: string, timeoutMs?: number): Promise<void>;
   confirmDialog(timeoutMs?: number): Promise<void>;
+  expectConfirmDialog(timeoutMs?: number): Promise<void>;
   tryClickButton(label: string, timeoutMs?: number): Promise<void>;
 }
 
@@ -68,26 +95,22 @@ export const dialogOperations: DialogOperations = {
 
   async confirmDialog(this: DriverContext, timeoutMs = 5_000): Promise<void> {
     try {
-      const page = this.getPage();
-      const dialog = page.locator(".monaco-dialog-box");
-      await dialog.waitFor({ state: "visible", timeout: timeoutMs });
-
-      const confirmLabels = ["OK", "Delete", "Move to Recycle Bin", "Move to Trash", "Yes", "Continue"];
-      for (const label of confirmLabels) {
-        const btn = dialog.getByRole("button", { name: label });
-        if (await btn.count() > 0) {
-          await btn.first().click();
-          return;
-        }
-      }
-
-      const firstBtn = dialog.locator(".dialog-buttons button").first();
-      if (await firstBtn.count() > 0) {
-        await firstBtn.click();
-      }
+      await clickConfirmButton(this.getPage(), timeoutMs);
     } catch {
       // Optional dialogs are action-dependent; absence is a successful no-op.
     }
+  },
+
+  /**
+   * Strict variant of `confirmDialog`: throws if no confirmation dialog
+   * appears within `timeoutMs`, or if no recognizable confirm button is found.
+   * Use this for steps that *must* surface a confirmation dialog (e.g. delete
+   * with `explorer.confirmDelete=true`); it pins the failure to the actual
+   * problem instead of silently passing and surfacing a misleading downstream
+   * symptom (e.g. "tree item didn't disappear") many seconds later.
+   */
+  async expectConfirmDialog(this: DriverContext, timeoutMs = 5_000): Promise<void> {
+    await clickConfirmButton(this.getPage(), timeoutMs);
   },
 
   async tryClickButton(this: DriverContext, label: string, timeoutMs = 3_000): Promise<void> {

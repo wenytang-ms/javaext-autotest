@@ -77,6 +77,13 @@ export interface TestStep {
   verifyTerminal?: TerminalVerification;
   timeout?: number;
   waitBefore?: number;
+  /**
+   * Number of additional attempts if the step fails or errors. Defaults to 0
+   * (no retry). Useful for known-flaky UI steps like context-menu clicks or
+   * tree-item polling on slow Windows runners — allows the plan author to
+   * declare retry intent instead of working around flake with `wait` steps.
+   */
+  retries?: number;
 }
 
 export interface DialogVerification {
