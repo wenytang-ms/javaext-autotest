@@ -1,12 +1,8 @@
 import type { Page } from "@playwright/test";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { DEFAULT_TIMEOUT } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
-  screenshot(outputPath?: string): Promise<Buffer>;
-  getNotifications(): Promise<string[]>;
 }
 
 export interface TreeOperations {
@@ -263,95 +259,14 @@ export const treeOperations: TreeOperations = {
         continue;
       }
 
-      const debugScreenshot = path.join(process.cwd(), "test-results", "maven-lifecycle-inline-action", "screenshots", `${itemName}-${actionLabel}-hover-before-click.png`);
-      fs.mkdirSync(path.dirname(debugScreenshot), { recursive: true });
-      await this.screenshot(debugScreenshot);
-
       const centerX = box.x + box.width / 2;
       const centerY = box.y + box.height / 2;
-      const hitTarget = await page.evaluate(({ x, y }) => {
-        const element = document.elementFromPoint(x, y);
-        const actionItem = element?.closest("li.action-item");
-        return {
-          tagName: element?.tagName,
-          className: element?.getAttribute("class"),
-          ariaLabel: element?.getAttribute("aria-label"),
-          title: element?.getAttribute("title"),
-          text: element?.textContent?.trim(),
-          actionItemClassName: actionItem?.getAttribute("class")
-        };
-      }, { x: centerX, y: centerY });
-      await target.evaluate((element, label) => {
-        const row = element.closest<HTMLElement>(".monaco-list-row");
-        const button = Array.from(row?.querySelectorAll<HTMLElement>("a.action-label[role='button']") ?? [])
-          .find(candidate => candidate.getAttribute("aria-label")?.includes(label));
-        const actionItem = button?.closest<HTMLElement>("li.action-item");
-        const events: unknown[] = [];
-        (window as unknown as { __treeActionEvents?: unknown[] }).__treeActionEvents = events;
-        for (const eventType of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
-          actionItem?.addEventListener(eventType, event => {
-            const mouseEvent = event as MouseEvent;
-            events.push({
-              source: "actionItem",
-              type: eventType,
-              isTrusted: event.isTrusted,
-              target: (event.target as HTMLElement | null)?.tagName,
-              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
-              currentTargetClass: (event.currentTarget as HTMLElement | null)?.getAttribute("class"),
-              button: mouseEvent.button,
-              defaultPrevented: event.defaultPrevented,
-            });
-          }, true);
-          actionItem?.addEventListener(eventType, event => {
-            const mouseEvent = event as MouseEvent;
-            events.push({
-              source: "actionItemAfter",
-              type: eventType,
-              isTrusted: event.isTrusted,
-              target: (event.target as HTMLElement | null)?.tagName,
-              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
-              currentTargetClass: (event.currentTarget as HTMLElement | null)?.getAttribute("class"),
-              button: mouseEvent.button,
-              defaultPrevented: event.defaultPrevented,
-            });
-          });
-          button?.addEventListener(eventType, event => {
-            const mouseEvent = event as MouseEvent;
-            events.push({
-              source: "actionLabel",
-              type: eventType,
-              isTrusted: event.isTrusted,
-              target: (event.target as HTMLElement | null)?.tagName,
-              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
-              button: mouseEvent.button,
-              defaultPrevented: event.defaultPrevented,
-            });
-          }, true);
-          button?.addEventListener(eventType, event => {
-            const mouseEvent = event as MouseEvent;
-            events.push({
-              source: "actionLabelAfter",
-              type: eventType,
-              isTrusted: event.isTrusted,
-              target: (event.target as HTMLElement | null)?.tagName,
-              targetClass: (event.target as HTMLElement | null)?.getAttribute("class"),
-              button: mouseEvent.button,
-              defaultPrevented: event.defaultPrevented,
-            });
-          });
-        }
-      }, actionLabel);
-      console.log(`   🔘 Tree item "${itemName}" action target: ${JSON.stringify({ actionInfo, hitTarget, debugScreenshot })}`);
       await page.mouse.move(centerX, centerY);
       await page.waitForTimeout(200);
       await page.mouse.down({ button: "left" });
       await page.waitForTimeout(100);
       await page.mouse.up({ button: "left" });
       await page.waitForTimeout(500);
-      const clickEvents = await page.evaluate(() => (window as unknown as { __treeActionEvents?: unknown[] }).__treeActionEvents ?? []);
-      const notifications = await this.getNotifications();
-      console.log(`   🖱️ Tree item "${itemName}" click events: ${JSON.stringify(clickEvents)}`);
-      console.log(`   🔔 Notifications after "${itemName}" action: ${JSON.stringify(notifications)}`);
       return;
     }
 
