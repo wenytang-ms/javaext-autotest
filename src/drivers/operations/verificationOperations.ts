@@ -13,6 +13,7 @@ interface DriverContext {
 export interface VerificationOperations {
   isElementVisible(role: string, name: string): Promise<boolean>;
   getElementText(role: string, name: string): Promise<string>;
+  getWebviewText(): Promise<string>;
   getProblems(): Promise<Diagnostic[]>;
   fileExists(filePath: string): Promise<boolean>;
   fileContains(filePath: string, text: string): Promise<boolean>;
@@ -31,6 +32,21 @@ export const verificationOperations: VerificationOperations = {
   async getElementText(this: DriverContext, role: string, name: string): Promise<string> {
     const page = this.getPage();
     return (await page.getByRole(role as any, { name }).textContent()) ?? "";
+  },
+
+  async getWebviewText(this: DriverContext): Promise<string> {
+    const page = this.getPage();
+    await page.locator("iframe.webview").last().waitFor({ state: "attached", timeout: 10_000 }).catch(() => {});
+
+    const texts: string[] = [];
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      const text = await frame.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+      if (text.trim()) {
+        texts.push(text.replace(/\u00A0/g, " ").trim());
+      }
+    }
+    return texts.join("\n");
   },
 
   async getProblems(this: DriverContext): Promise<Diagnostic[]> {

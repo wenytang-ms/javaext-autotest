@@ -54,6 +54,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       verifyDialog: step.verifyDialog as TestStep["verifyDialog"],
       verifyTreeItem: step.verifyTreeItem as TestStep["verifyTreeItem"],
       verifyEditorTab: step.verifyEditorTab as TestStep["verifyEditorTab"],
+      verifyWebview: step.verifyWebview as TestStep["verifyWebview"],
       verifyOutputChannel: step.verifyOutputChannel as TestStep["verifyOutputChannel"],
       verifyTerminal: step.verifyTerminal as TestStep["verifyTerminal"],
       timeout: step.timeout as number | undefined,

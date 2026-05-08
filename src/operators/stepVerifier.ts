@@ -36,7 +36,7 @@ export class StepVerifier {
         && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
         && !step.verifyQuickInput && !step.verifyDialog
         && !step.verifyTreeItem && !step.verifyEditorTab
-        && !step.verifyOutputChannel && !step.verifyTerminal) {
+        && !step.verifyWebview && !step.verifyOutputChannel && !step.verifyTerminal) {
       return { passed: true };
     }
 
@@ -68,6 +68,9 @@ export class StepVerifier {
 
     const editorTabResult = await this.verifyEditorTabCheck(step);
     if (editorTabResult && !editorTabResult.passed) return editorTabResult;
+
+    const webviewResult = await this.verifyWebviewCheck(step);
+    if (webviewResult && !webviewResult.passed) return webviewResult;
 
     const outputChannelResult = await this.verifyOutputChannelCheck(step);
     if (outputChannelResult && !outputChannelResult.passed) return outputChannelResult;
@@ -353,6 +356,33 @@ export class StepVerifier {
     return { passed: true };
   }
 
+  private async verifyWebviewCheck(step: TestStep): Promise<VerifyResult | null> {
+    if (!step.verifyWebview) return null;
+
+    let text = "";
+    return pollUntil<VerifyResult>(step, {
+      waitFn: (s) => this.driver.wait(s),
+      check: async () => {
+        text = await this.driver.getWebviewText();
+        const containsOk = this.asArray(step.verifyWebview?.contains).every((expected) => text.includes(expected));
+        const notContainsOk = this.asArray(step.verifyWebview?.notContains).every((unexpected) => !text.includes(unexpected));
+        if (containsOk && notContainsOk) return { done: true, result: { passed: true } };
+        return { done: false };
+      },
+      onTimeout: async () => {
+        const missing = this.asArray(step.verifyWebview?.contains).find((expected) => !text.includes(expected));
+        if (missing !== undefined) {
+          return { passed: false, reason: `Webview does not contain: "${missing}". Webview text: ${text.slice(0, 1000)}` };
+        }
+        const unexpected = this.asArray(step.verifyWebview?.notContains).find((value) => text.includes(value));
+        if (unexpected !== undefined) {
+          return { passed: false, reason: `Webview unexpectedly contains: "${unexpected}"` };
+        }
+        return { passed: true };
+      },
+    });
+  }
+
   private async verifyOutputChannelCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
     if (!step.verifyOutputChannel) return null;
 
@@ -393,6 +423,11 @@ export class StepVerifier {
         return { passed: true };
       },
     });
+  }
+
+  private asArray(value: string | string[] | undefined): string[] {
+    if (value === undefined) return [];
+    return Array.isArray(value) ? value : [value];
   }
 
 }

@@ -73,6 +73,7 @@ export interface TestStep {
   verifyDialog?: DialogVerification;
   verifyTreeItem?: TreeItemVerification;
   verifyEditorTab?: EditorTabVerification;
+  verifyWebview?: WebviewVerification;
   verifyOutputChannel?: OutputChannelVerification;
   verifyTerminal?: TerminalVerification;
   timeout?: number;
@@ -105,6 +106,13 @@ export interface TreeItemVerification {
 export interface EditorTabVerification {
   /** Editor tab title to check */
   title: string;
+}
+
+export interface WebviewVerification {
+  /** Active webview text must contain this substring, or all substrings. */
+  contains?: string | string[];
+  /** Active webview text must NOT contain this substring, or any of these substrings. */
+  notContains?: string | string[];
 }
 
 export interface OutputChannelVerification {
