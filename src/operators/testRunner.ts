@@ -235,11 +235,38 @@ export class TestRunner {
       // Delegate verification to StepVerifier (deterministic only)
       const verifyResult = await this.verifier.verify(step);
 
+      let status: StepResult["status"] = verifyResult.passed ? "pass" : "fail";
+      let reason = verifyResult.reason;
+
+      // LLM-authoritative re-check: a deterministic pass can still mask a
+      // silent-pass (e.g. action that did nothing but verify text leaked from
+      // a prior state). Ask the LLM to inspect before/after screenshots and
+      // downgrade to fail when confident the action did not produce the
+      // expected outcome. Never upgrades fail → pass.
+      if (
+        status === "pass" &&
+        step.verify &&
+        beforePath &&
+        afterPath &&
+        this.llm?.isConfigured()
+      ) {
+        const llmResult = await this.runLlmVerification(step, beforePath, afterPath);
+        if (llmResult) {
+          if (!llmResult.passed && llmResult.confidence >= 0.6) {
+            status = "fail";
+            reason = `[LLM] ${llmResult.reasoning}${llmResult.suggestion ? ` 💡 ${llmResult.suggestion}` : ""}`;
+            console.log(`   🤖 [${step.id}] LLM downgraded pass → fail (confidence ${llmResult.confidence.toFixed(2)}): ${llmResult.reasoning}`);
+          } else {
+            console.log(`   🤖 [${step.id}] LLM verified — ${llmResult.reasoning}`);
+          }
+        }
+      }
+
       return {
         stepId: step.id,
         action: step.action,
-        status: verifyResult.passed ? "pass" : "fail",
-        reason: verifyResult.reason,
+        status,
+        reason,
         duration: Date.now() - start,
         screenshot: afterPath,
       };
@@ -254,6 +281,27 @@ export class TestRunner {
         duration: Date.now() - start,
         screenshot: errorPath,
       };
+    }
+  }
+
+  /**
+   * Best-effort LLM screenshot verification. Returns null when the call fails
+   * so we keep the deterministic verdict rather than turning a transient LLM
+   * outage into a test failure.
+   */
+  private async runLlmVerification(
+    step: TestStep,
+    beforePath: string,
+    afterPath: string,
+  ): Promise<{ passed: boolean; reasoning: string; confidence: number; suggestion?: string } | null> {
+    if (!this.llm) return null;
+    try {
+      const beforeBase64 = fs.readFileSync(beforePath).toString("base64");
+      const afterBase64 = fs.readFileSync(afterPath).toString("base64");
+      return await this.llm.verifyStep(beforeBase64, afterBase64, step.action, step.verify ?? "");
+    } catch (e) {
+      console.log(`   🤖 ⚠️ [${step.id}] LLM verification error (keeping deterministic pass): ${(e as Error).message}`);
+      return null;
     }
   }
 
