@@ -35,6 +35,24 @@ export const commandOperations: CommandOperations = {
     await palette.fill(`>${label}`);
     await page.waitForTimeout(300);
 
+    // Guard against silent-pass: if no visible option's label-name contains the
+    // requested label (case-insensitive), Enter would dismiss the palette
+    // without running anything and the step would falsely "pass" in ~800ms.
+    // Surface this as an error so a typo'd or renamed command is loud.
+    const labelNames = page.locator(`${SELECTORS.QUICK_INPUT_WIDGET} .quick-input-list a.label-name`);
+    try {
+      await labelNames.first().waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    } catch {
+      await page.keyboard.press("Escape").catch(() => {});
+      throw new Error(`No palette match for "${label}"`);
+    }
+    const names = (await labelNames.allInnerTexts()).map(t => t.trim().toLowerCase());
+    const wanted = label.trim().toLowerCase();
+    if (!names.some(n => n.includes(wanted))) {
+      await page.keyboard.press("Escape").catch(() => {});
+      throw new Error(`No palette match for "${label}" (top entries: ${names.slice(0, 3).join(" | ") || "<none>"})`);
+    }
+
     await page.keyboard.press(KEYS.ENTER);
     await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
@@ -48,8 +66,27 @@ export const commandOperations: CommandOperations = {
     await palette.fill(`>${label}`);
     await page.waitForTimeout(500);
 
-    const option = page.getByRole("option", { name: label }).locator("a");
-    await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    // Match the visible label-name text exactly (case-insensitive) to
+    // disambiguate similarly-prefixed entries (e.g. "View: Close All Editors"
+    // vs "View: Close All Editors in Group") and avoid clicking the gear
+    // "Configure Keybinding" anchor on the option row.
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const option = page
+      .locator(`${SELECTORS.QUICK_INPUT_WIDGET} .quick-input-list a.label-name`)
+      .filter({ hasText: new RegExp(`^\\s*${escaped}\\s*$`, "i") })
+      .first();
+    try {
+      await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    } catch {
+      const visible = await page
+        .locator(`${SELECTORS.QUICK_INPUT_WIDGET} .quick-input-list a.label-name`)
+        .allInnerTexts()
+        .catch(() => [] as string[]);
+      await page.keyboard.press("Escape").catch(() => {});
+      throw new Error(
+        `No exact palette match for "${label}" (top entries: ${visible.slice(0, 3).map(t => t.trim()).join(" | ") || "<none>"})`
+      );
+    }
     await option.click();
     await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
