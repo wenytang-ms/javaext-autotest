@@ -68,6 +68,10 @@ export class ActionResolver {
         handler: async (m) => { await d.runCommandFromPalette(m[1]); },
       },
       {
+        regex: /^clickInWebview\s+(.+)$/i,
+        handler: async (m) => { await d.clickInWebview(m[1].trim()); },
+      },
+      {
         regex: /^pressKey\s+(.+)$/i,
         handler: async (m) => { await d.pressKey(m[1].trim()); },
       },

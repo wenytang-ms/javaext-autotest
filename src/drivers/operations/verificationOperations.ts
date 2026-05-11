@@ -14,6 +14,7 @@ export interface VerificationOperations {
   isElementVisible(role: string, name: string): Promise<boolean>;
   getElementText(role: string, name: string): Promise<string>;
   getWebviewText(): Promise<string>;
+  clickInWebview(selector: string): Promise<void>;
   getProblems(): Promise<Diagnostic[]>;
   fileExists(filePath: string): Promise<boolean>;
   fileContains(filePath: string, text: string): Promise<boolean>;
@@ -47,6 +48,40 @@ export const verificationOperations: VerificationOperations = {
       }
     }
     return texts.join("\n");
+  },
+
+  /**
+   * Click an element inside a VS Code webview iframe.
+   *
+   * Iterates every non-main frame, returns on the first frame whose
+   * `selector` resolves to a visible element. Throws if no frame
+   * contains the selector — so callers get a hard error instead of
+   * a silent no-op (the same class of silent-pass we fixed for the
+   * command palette in 0.6.9).
+   */
+  async clickInWebview(this: DriverContext, selector: string): Promise<void> {
+    const page = this.getPage();
+    await page.locator("iframe.webview").last().waitFor({ state: "attached", timeout: 10_000 }).catch(() => {});
+
+    let lastErr: unknown = null;
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      try {
+        const loc = frame.locator(selector).first();
+        if ((await loc.count()) > 0) {
+          await loc.click({ timeout: 5_000 });
+          console.log(`   🖱️  clicked "${selector}" in webview frame`);
+          return;
+        }
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+
+    throw new Error(
+      `clickInWebview: selector "${selector}" not found in any webview iframe` +
+        (lastErr ? ` (last error: ${(lastErr as Error).message})` : "")
+    );
   },
 
   async getProblems(this: DriverContext): Promise<Diagnostic[]> {
