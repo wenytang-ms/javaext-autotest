@@ -31,6 +31,19 @@ import { verificationOperations, type VerificationOperations } from "./operation
 const WORKBENCH_SELECTOR = ".monaco-workbench";
 
 /**
+ * Default deadline for `.monaco-workbench` to render after VSCode launch.
+ *
+ * The previous value (30 s) was tight on Windows runners that install
+ * multiple heavy extensions (e.g. redhat.java + vscjava.vscode-java-pack):
+ * Electron startup + extension activation can easily push first paint past
+ * 30 s on a noisy hosted-compute agent, surfacing as a fatal
+ * `locator('.monaco-workbench') waitFor` timeout that skips every step.
+ * 60 s is a conservative ceiling — fast launches still finish in < 10 s
+ * and are unaffected.
+ */
+const DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS = 60_000;
+
+/**
  * Pool of keybinding combinations used to drive VS Code commands by id.
  *
  * VS Code's smoke-test driver does NOT expose `executeCommand` on `window.driver`
@@ -306,8 +319,12 @@ export class VscodeDriver {
     this.launchedPid = this.app.process().pid ?? null;
 
     this.page = await this.app.firstWindow();
-    // Wait for VSCode workbench to render
-    await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: 30_000 });
+    // Wait for VSCode workbench to render. See DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS
+    // — Windows runners with multiple heavy extensions can need significantly
+    // more than the historic 30 s; the value is now configurable via
+    // VscodeDriverOptions.workbenchLaunchTimeoutMs for advanced scenarios.
+    const workbenchTimeout = this.options.workbenchLaunchTimeoutMs ?? DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS;
+    await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: workbenchTimeout });
 
     // Auto-dismiss Electron native dialogs (e.g. redhat.java refactoring
     // confirmation, delete file confirmation). These dialogs are outside

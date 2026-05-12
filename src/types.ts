@@ -218,6 +218,13 @@ export interface VscodeDriverOptions {
   workspaceTrust?: "trusted" | "untrusted" | "disabled";
   /** Mock showOpenDialog responses — each entry is consumed in order */
   mockOpenDialog?: string[][];
+  /**
+   * Max time (ms) to wait for `.monaco-workbench` to render after launch.
+   * Defaults to {@link DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS}. Bump this for slow
+   * runners or when the test installs many extensions (extension
+   * activation contributes to first-paint on Windows CI).
+   */
+  workbenchLaunchTimeoutMs?: number;
 }
 
 // ─── Execution Result Types ────────────────────────────────
