@@ -99,9 +99,29 @@ export const commandOperations: CommandOperations = {
 
   async pressTerminalKey(this: DriverContext, key: string): Promise<void> {
     const page = this.getPage();
-    const terminal = page.locator(".terminal-wrapper .xterm, .terminal-wrapper").last();
-    await terminal.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await terminal.click({ force: true });
+    // Focus the active terminal via VS Code's built-in command. This
+    // bypasses DOM locator heuristics ("which `.terminal-wrapper .xterm`
+    // is the right one?") entirely: VS Code's TerminalService knows
+    // exactly which xterm instance is the active one and will focus
+    // its input regardless of DOM order or CSS visibility state.
+    //
+    // Background: the previous implementation used
+    //   page.locator(".terminal-wrapper .xterm, .terminal-wrapper").last()
+    // and `.last()` would intermittently pick a CSS-hidden xterm wrapper
+    // left over from extension-host bootstrap on headless GitHub Actions
+    // Windows runners (canvas-renderer environments). Playwright's
+    // `waitFor visible` would then time out and the key was never
+    // delivered. Going through the VS Code command avoids the entire
+    // class of "stale ghost xterm" flakes and works identically on all
+    // three OSes.
+    //
+    // The keybinding-driven `executeVSCodeCommand` is used instead of
+    // the command palette so this helper does not pollute the palette
+    // history or risk dismissing an unrelated quick-input the caller
+    // might have open.
+    const keybinding = await this.assignKeybindingForCommand("workbench.action.terminal.focus", []);
+    await page.keyboard.press(keybinding);
+    await page.waitForTimeout(200);
     await page.keyboard.press(key);
     await page.waitForTimeout(300);
   },
