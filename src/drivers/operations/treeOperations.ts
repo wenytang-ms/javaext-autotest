@@ -168,7 +168,10 @@ export const treeOperations: TreeOperations = {
 
   async clickTreeItemAction(this: DriverContext, itemName: string, actionLabel: string): Promise<void> {
     const page = this.getPage();
-    const target = page.getByRole("treeitem", { name: itemName, exact: true }).first();
+    const exactItem = page.getByRole("treeitem", { name: itemName, exact: true }).first();
+    const target = await exactItem.count() > 0
+      ? exactItem
+      : page.getByRole("treeitem", { name: itemName }).first();
     await target.waitFor({ state: "visible", timeout: 15_000 });
 
     let lastActionInfo: unknown;
