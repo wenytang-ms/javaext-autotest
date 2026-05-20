@@ -187,8 +187,14 @@ export const commandOperations: CommandOperations = {
 
   async goToLine(this: DriverContext, line: number): Promise<void> {
     const page = this.getPage();
-    const modifier = getModifierKey();
-    await page.keyboard.press(`${modifier}+G`);
+    // VS Code's "Go to Line/Column..." (workbench.action.gotoLine) is bound to
+    // `Ctrl+G` on Windows, Linux AND macOS — unlike most VS Code shortcuts,
+    // it is NOT remapped to `Cmd+G` on macOS because `Cmd+G` is the standard
+    // macOS "Find Next" binding (editor.action.nextMatchFindAction). Using
+    // `${getModifierKey()}+G` would press `Cmd+G` on darwin and silently
+    // trigger find-next instead of opening the Go-to-Line quick input,
+    // making this helper a no-op on macOS CI runners.
+    await page.keyboard.press("Control+G");
     const input = page.locator(SELECTORS.QUICK_INPUT);
     await input.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await input.fill(`:${line}`);
