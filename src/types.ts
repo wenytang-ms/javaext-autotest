@@ -85,6 +85,19 @@ export interface TestStep {
    * declare retry intent instead of working around flake with `wait` steps.
    */
   retries?: number;
+  /**
+   * If true, skip the LLM screenshot-based re-verification (which can only
+   * downgrade pass→fail). Use for steps where the screenshot is unreliable
+   * (transient "Loading…" indicators, background indexing status bar text,
+   * disk-only mutations with no visual change) but a deterministic check
+   * (a `verify*` structured field, or an external assertion) is authoritative.
+   *
+   * Note: LLM verification is already auto-skipped when ANY structured
+   * `verify*` field is set on the step, since those checks are authoritative.
+   * Set this flag explicitly only when relying purely on `verify:` text but
+   * still wanting to opt the step out of LLM downgrade.
+   */
+  skipLlmVerify?: boolean;
 }
 
 export interface DialogVerification {

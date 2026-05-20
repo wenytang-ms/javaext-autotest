@@ -21,6 +21,31 @@ export interface TestRunnerOptions {
   noLLM?: boolean;
 }
 
+/**
+ * True when the step carries at least one structured `verify*` field whose
+ * authoritative deterministic check (DOM/file/problems/completion/...) makes
+ * the LLM screenshot re-check redundant. When this is true, the LLM is
+ * skipped even if `step.verify` text is also present, because that text only
+ * documents intent for human readers / failure analysis — the structured
+ * verifier is the source of truth.
+ */
+function hasStructuredVerify(step: TestStep): boolean {
+  return Boolean(
+    step.verifyFile ||
+      step.verifyNotification ||
+      step.verifyEditor ||
+      step.verifyProblems ||
+      step.verifyCompletion ||
+      step.verifyQuickInput ||
+      step.verifyDialog ||
+      step.verifyTreeItem ||
+      step.verifyEditorTab ||
+      step.verifyWebview ||
+      step.verifyOutputChannel ||
+      step.verifyTerminal,
+  );
+}
+
 export class TestRunner {
   private driver: VscodeDriver;
   private plan: TestPlan;
@@ -238,14 +263,24 @@ export class TestRunner {
       let status: StepResult["status"] = verifyResult.passed ? "pass" : "fail";
       let reason = verifyResult.reason;
 
-      // LLM-authoritative re-check: a deterministic pass can still mask a
-      // silent-pass (e.g. action that did nothing but verify text leaked from
-      // a prior state). Ask the LLM to inspect before/after screenshots and
-      // downgrade to fail when confident the action did not produce the
-      // expected outcome. Never upgrades fail → pass.
+      // LLM-authoritative re-check: a deterministic pass on `verify:` text
+      // can mask a silent-pass (action did nothing but the verify text leaks
+      // from prior state). Ask the LLM to inspect before/after screenshots
+      // and downgrade pass→fail when confident the action did not produce
+      // the expected outcome. Never upgrades fail → pass.
+      //
+      // Skip the LLM re-check when:
+      //   - `step.skipLlmVerify` is set (explicit opt-out), OR
+      //   - any structured `verify*` field is set on the step — those checks
+      //     (DOM/file/problems/completion/...) are authoritative and not
+      //     subject to screenshot-timing artifacts like "Loading..." or
+      //     "Java: Searching... 0%". Re-running the LLM in this case only
+      //     introduces noise (false downgrades on transient screenshots).
       if (
         status === "pass" &&
         step.verify &&
+        !step.skipLlmVerify &&
+        !hasStructuredVerify(step) &&
         beforePath &&
         afterPath &&
         this.llm?.isConfigured()
