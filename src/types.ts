@@ -87,15 +87,24 @@ export interface TestStep {
   retries?: number;
   /**
    * If true, skip the LLM screenshot-based re-verification (which can only
-   * downgrade pass→fail). Use for steps where the screenshot is unreliable
-   * (transient "Loading…" indicators, background indexing status bar text,
-   * disk-only mutations with no visual change) but a deterministic check
-   * (a `verify*` structured field, or an external assertion) is authoritative.
+   * downgrade pass→fail). Use for steps where the screenshot is fundamentally
+   * uninformative and a deterministic check is the ONLY meaningful signal:
    *
-   * Note: LLM verification is already auto-skipped when ANY structured
-   * `verify*` field is set on the step, since those checks are authoritative.
-   * Set this flag explicitly only when relying purely on `verify:` text but
-   * still wanting to opt the step out of LLM downgrade.
+   *   - The action *is* the verification (e.g. `waitForLanguageServer`
+   *     polls the status bar for "Java: Ready" — looking at the same status
+   *     bar with the LLM adds no signal and only false-downgrades on
+   *     transient background-indexing text).
+   *   - The action produces no visible change by-design (e.g. disk-only
+   *     `insertLineInFile` / `saveFile` against a file that isn't open in
+   *     any editor — before/after screenshots are necessarily identical
+   *     and the LLM will always downgrade).
+   *
+   * Do NOT set this flag just because the step has a structured `verify*`
+   * field — the LLM may still catch silent-pass scenarios that the
+   * deterministic check misses (e.g. `verifyEditor.contains` can match
+   * stale text in a hidden editor tab; `verifyProblems.errors: 0` can hold
+   * trivially if the file isn't being analyzed). Prefer using
+   * `retries: 1-2` to mitigate transient LLM downgrades on decoration lag.
    */
   skipLlmVerify?: boolean;
 }
