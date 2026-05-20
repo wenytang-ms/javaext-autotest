@@ -60,6 +60,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       timeout: step.timeout as number | undefined,
       waitBefore: step.waitBefore as number | undefined,
       retries: typeof step.retries === "number" ? Math.max(0, step.retries) : undefined,
+      skipLlmVerify: typeof step.skipLlmVerify === "boolean" ? step.skipLlmVerify : undefined,
     };
   });
 
