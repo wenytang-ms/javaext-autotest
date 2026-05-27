@@ -33,6 +33,12 @@ export const fileExplorerOperations: FileExplorerOperations = {
       // Selection is best-effort; right-click below also tries to select.
     }
 
+    // Selection-click on the target row already runs above (line 30). At
+    // this point the row is selected/highlighted, so the pre-right-click
+    // frame shows "what the user is about to right-click" before the menu
+    // appears.
+    await this.subScreenshot?.(`tree-${itemName}-pre-rightclick`);
+
     const escaped = menuLabel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -40,7 +46,6 @@ export const fileExplorerOperations: FileExplorerOperations = {
 
       const menu = page.locator(".monaco-menu-container .monaco-menu");
       await menu.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-      await this.subScreenshot?.(`context-menu-${itemName}-open`);
 
       // Resolve menu item using exact > exact-with-ellipsis > substring tiers.
       // Without this tiering, Playwright's default substring match silently
@@ -68,7 +73,7 @@ export const fileExplorerOperations: FileExplorerOperations = {
         state: "visible",
         timeout: DEFAULT_TIMEOUT,
       }).catch(() => { /* best effort */ });
-      await this.subScreenshot?.(`context-menu-${menuLabel}-focused`);
+      await this.subScreenshot?.(`context-menu-${menuLabel}-pre-click`);
       await menuItem.click();
 
       // Verify the menu dismissed — proxy for "the command actually fired".

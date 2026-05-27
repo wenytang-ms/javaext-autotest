@@ -325,7 +325,6 @@ export const treeOperations: TreeOperations = {
     await header.scrollIntoViewIfNeeded().catch(() => { /* best effort */ });
     await header.hover();
     await page.waitForTimeout(300);
-    await this.subScreenshot?.(`view-title-${viewName}-hover`);
 
     // Try clicking a direct (navigation-group) action button first.
     // Use Playwright's role/name match instead of aria-label attribute interpolation
@@ -336,9 +335,15 @@ export const treeOperations: TreeOperations = {
     }).first();
     if (await directAction.count() > 0) {
       try {
+        // Hover the actual button + dwell long enough for VS Code's tooltip
+        // delay so the pre-click frame captures both target highlight and the
+        // tooltip label — proves the click is about to land on the right
+        // element, not just somewhere on the toolbar.
+        await directAction.hover();
+        await page.waitForTimeout(800);
+        await this.subScreenshot?.(`view-title-${actionLabel}-pre-click`);
         await directAction.click({ timeout: 2000 });
         await page.waitForTimeout(500);
-        await this.subScreenshot?.(`view-title-${actionLabel}-clicked`);
         return;
       } catch {
         // Fall through to overflow-menu path.
@@ -353,9 +358,11 @@ export const treeOperations: TreeOperations = {
       `.pane-header a.action-label[aria-label*="More Actions"]`,
     ).first();
     await overflow.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await overflow.hover();
+    await page.waitForTimeout(800);
+    await this.subScreenshot?.(`view-title-${viewName}-pre-click-overflow`);
     await overflow.click();
     await page.waitForTimeout(300);
-    await this.subScreenshot?.(`view-title-${viewName}-overflow-open`);
 
     // Click the menu item by label.
     const menu = page.locator(".monaco-menu-container .monaco-menu, .context-view .monaco-menu").first();
@@ -370,10 +377,9 @@ export const treeOperations: TreeOperations = {
       state: "visible",
       timeout: DEFAULT_TIMEOUT,
     }).catch(() => { /* best effort */ });
-    await this.subScreenshot?.(`view-title-${actionLabel}-menuitem-focused`);
+    await this.subScreenshot?.(`view-title-${actionLabel}-pre-click-menuitem`);
     await menuItem.click();
     await page.waitForTimeout(500);
-    await this.subScreenshot?.(`view-title-${actionLabel}-clicked`);
   },
 
   async clickEditorTitleAction(this: DriverContext, actionLabel: string): Promise<void> {
@@ -387,7 +393,6 @@ export const treeOperations: TreeOperations = {
     const titleArea = activeGroup.locator(".title").first();
     await titleArea.hover().catch(() => { /* best effort */ });
     await page.waitForTimeout(200);
-    await this.subScreenshot?.(`editor-title-hover`);
 
     // 1) Direct navigation-group action button.
     const directAction = activeGroup.locator(".editor-actions").getByRole("button", {
@@ -396,9 +401,11 @@ export const treeOperations: TreeOperations = {
     }).first();
     if (await directAction.count() > 0) {
       try {
+        await directAction.hover();
+        await page.waitForTimeout(800);
+        await this.subScreenshot?.(`editor-title-${actionLabel}-pre-click`);
         await directAction.click({ timeout: 2000 });
         await page.waitForTimeout(500);
-        await this.subScreenshot?.(`editor-title-${actionLabel}-clicked`);
         return;
       } catch {
         // Fall through to overflow menu.
@@ -411,9 +418,11 @@ export const treeOperations: TreeOperations = {
       `.editor-actions a.action-label[aria-label*="More Actions"]`,
     ).first();
     await overflow.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await overflow.hover();
+    await page.waitForTimeout(800);
+    await this.subScreenshot?.(`editor-title-pre-click-overflow`);
     await overflow.click();
     await page.waitForTimeout(300);
-    await this.subScreenshot?.(`editor-title-overflow-open`);
 
     const menu = page.locator(".monaco-menu-container .monaco-menu, .context-view .monaco-menu").first();
     await menu.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
@@ -424,9 +433,8 @@ export const treeOperations: TreeOperations = {
       state: "visible",
       timeout: DEFAULT_TIMEOUT,
     }).catch(() => { /* best effort */ });
-    await this.subScreenshot?.(`editor-title-${actionLabel}-menuitem-focused`);
+    await this.subScreenshot?.(`editor-title-${actionLabel}-pre-click-menuitem`);
     await menuItem.click();
     await page.waitForTimeout(500);
-    await this.subScreenshot?.(`editor-title-${actionLabel}-clicked`);
   },
 };

@@ -33,10 +33,8 @@ export const commandOperations: CommandOperations = {
 
     const palette = page.locator(SELECTORS.QUICK_INPUT);
     await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await this.subScreenshot?.(`palette-open`);
     await palette.fill(`>${label}`);
     await page.waitForTimeout(300);
-    await this.subScreenshot?.(`palette-filtered-${label}`);
 
     // Guard against silent-pass: if no visible option's label-name contains the
     // requested label (case-insensitive), Enter would dismiss the palette
@@ -56,6 +54,8 @@ export const commandOperations: CommandOperations = {
       throw new Error(`No palette match for "${label}" (top entries: ${names.slice(0, 3).join(" | ") || "<none>"})`);
     }
 
+    // No sub-screenshot here: this path confirms via Enter keypress, not a
+    // mouse click. Sub-screenshots are reserved for actual click events.
     await page.keyboard.press(KEYS.ENTER);
     await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
@@ -66,10 +66,8 @@ export const commandOperations: CommandOperations = {
 
     const palette = page.locator(SELECTORS.QUICK_INPUT);
     await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await this.subScreenshot?.(`palette-open`);
     await palette.fill(`>${label}`);
     await page.waitForTimeout(500);
-    await this.subScreenshot?.(`palette-filtered-${label}`);
 
     // Match the visible label-name text exactly (case-insensitive) to
     // disambiguate similarly-prefixed entries (e.g. "View: Close All Editors"
@@ -93,7 +91,7 @@ export const commandOperations: CommandOperations = {
       );
     }
     await option.hover().catch(() => { /* best effort */ });
-    await this.subScreenshot?.(`palette-highlighted-${label}`);
+    await this.subScreenshot?.(`palette-${label}-pre-click`);
     await option.click();
     await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },

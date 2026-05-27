@@ -75,7 +75,6 @@ export const quickInputOperations: QuickInputOperations = {
 
   async selectPaletteOption(this: DriverContext, optionText: string): Promise<void> {
     const page = this.getPage();
-    await this.subScreenshot?.(`palette-${optionText}-dropdown`);
     // Resolution order (each falls back to the next if zero matches):
     //   1. exact accessible-name match — works for plain text labels.
     //   2. exact `.label-name` text match — disambiguates options whose
@@ -88,7 +87,7 @@ export const quickInputOperations: QuickInputOperations = {
     if (await exactOption.count() > 0) {
       await exactOption.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
       await exactOption.hover().catch(() => { /* best effort */ });
-      await this.subScreenshot?.(`palette-${optionText}-highlighted`);
+      await this.subScreenshot?.(`palette-${optionText}-pre-click`);
       await exactOption.click();
       await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
       return;
@@ -97,7 +96,7 @@ export const quickInputOperations: QuickInputOperations = {
     if (await labelNameMatch.count() > 0) {
       await labelNameMatch.first().waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
       await labelNameMatch.first().hover().catch(() => { /* best effort */ });
-      await this.subScreenshot?.(`palette-${optionText}-highlighted`);
+      await this.subScreenshot?.(`palette-${optionText}-pre-click`);
       await labelNameMatch.first().click();
       await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
       return;
@@ -105,7 +104,7 @@ export const quickInputOperations: QuickInputOperations = {
     const fuzzyOption = page.getByRole("option", { name: optionText }).locator("a").first();
     await fuzzyOption.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await fuzzyOption.hover().catch(() => { /* best effort */ });
-    await this.subScreenshot?.(`palette-${optionText}-highlighted`);
+    await this.subScreenshot?.(`palette-${optionText}-pre-click`);
     await fuzzyOption.click();
     await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
