@@ -107,11 +107,42 @@ export class StepVerifier {
       if (step.verifyFile.contains) {
         const contains = await this.driver.fileContains(filePath, step.verifyFile.contains);
         if (!contains) {
-          return { passed: false, reason: `File does not contain: "${step.verifyFile.contains}"` };
+          const snippet = await this.readFileSnippet(filePath);
+          return {
+            passed: false,
+            reason: `File does not contain: "${step.verifyFile.contains}"\n--- file (${filePath}) ---\n${snippet}\n--- end ---`,
+          };
+        }
+      }
+      if (step.verifyFile.matches) {
+        const content = await this.driver.readFile(filePath);
+        let re: RegExp;
+        try {
+          re = new RegExp(step.verifyFile.matches);
+        } catch (e) {
+          return { passed: false, reason: `Invalid regex in verifyFile.matches: "${step.verifyFile.matches}" — ${(e as Error).message}` };
+        }
+        if (!re.test(content)) {
+          const snippet = await this.readFileSnippet(filePath);
+          return {
+            passed: false,
+            reason: `File does not match regex: /${step.verifyFile.matches}/\n--- file (${filePath}) ---\n${snippet}\n--- end ---`,
+          };
         }
       }
     }
     return { passed: true };
+  }
+
+  /** Read up to ~2KB of a file for inclusion in failure reasons. */
+  private async readFileSnippet(filePath: string): Promise<string> {
+    try {
+      const content = await this.driver.readFile(filePath);
+      const max = 2048;
+      return content.length > max ? content.substring(0, max) + "\n…(truncated)" : content;
+    } catch (e) {
+      return `(could not read file: ${(e as Error).message})`;
+    }
   }
 
   private async verifyNotification(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
@@ -332,14 +363,14 @@ export class StepVerifier {
     const timeoutMs = (step.timeout ?? DEFAULT_TREE_ITEM_TIMEOUT_S) * 1000;
 
     if (expectVisible) {
-      const found = await this.driver.waitForTreeItem(step.verifyTreeItem.name, timeoutMs, exact);
+      const found = await this.driver.waitForTreeItem(step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView);
       if (!found) {
-        return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not appear within ${timeoutMs / 1000}s` };
+        return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not appear within ${timeoutMs / 1000}s${step.verifyTreeItem.inView ? ` in view "${step.verifyTreeItem.inView}"` : ""}` };
       }
     } else {
-      const gone = await this.driver.waitForTreeItemGone(step.verifyTreeItem.name, timeoutMs, exact);
+      const gone = await this.driver.waitForTreeItemGone(step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView);
       if (!gone) {
-        return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not disappear within ${timeoutMs / 1000}s` };
+        return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not disappear within ${timeoutMs / 1000}s${step.verifyTreeItem.inView ? ` in view "${step.verifyTreeItem.inView}"` : ""}` };
       }
     }
     return { passed: true };

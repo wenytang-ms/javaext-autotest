@@ -13,6 +13,58 @@ import * as path from "node:path";
 import { loadTestPlan, validateTestPlanFile } from "../operators/planParser.js";
 import { TestRunner } from "../operators/testRunner.js";
 
+/**
+ * Minimal .env loader (no external dependency).
+ * Looks for a `.env` file in the current working directory and any directory
+ * passed via AUTOTEST_ENV_DIR or `--env-file`. Existing `process.env` entries
+ * are NOT overridden so the shell env still wins.
+ *
+ * Supported syntax: KEY=value, KEY="value", KEY='value'. Lines starting with
+ * `#` and blank lines are ignored. Inline `#` comments after an unquoted value
+ * are stripped.
+ */
+function loadDotEnv(envPath: string): boolean {
+  if (!fs.existsSync(envPath)) return false;
+  let content: string;
+  try {
+    content = fs.readFileSync(envPath, "utf8");
+  } catch {
+    return false;
+  }
+  let count = 0;
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 1) continue;
+    const key = line.substring(0, eq).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    let value = line.substring(eq + 1).trim();
+    // Strip surrounding quotes
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.substring(1, value.length - 1);
+    } else {
+      // Strip inline comments only for unquoted values
+      const hashIdx = value.indexOf(" #");
+      if (hashIdx >= 0) value = value.substring(0, hashIdx).trim();
+    }
+    if (!(key in process.env)) {
+      process.env[key] = value;
+      count++;
+    }
+  }
+  if (count > 0) {
+    console.log(`🔑 Loaded ${count} env var(s) from ${envPath}`);
+  }
+  return count > 0;
+}
+
+// Auto-load .env from CWD at CLI startup (before any subcommand runs).
+loadDotEnv(path.resolve(process.cwd(), ".env"));
+
 /** Generate markdown summary from test reports */
 function generateSummary(reports: Array<any>): {
   mdLines: string[];

@@ -7,6 +7,10 @@ interface DriverContext {
   runCommandFromPalette(label: string): Promise<void>;
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export interface QuickInputOperations {
   dismissAllNotifications(): Promise<void>;
   fillQuickInput(text: string): Promise<void>;
@@ -70,11 +74,31 @@ export const quickInputOperations: QuickInputOperations = {
 
   async selectPaletteOption(this: DriverContext, optionText: string): Promise<void> {
     const page = this.getPage();
+    // Resolution order (each falls back to the next if zero matches):
+    //   1. exact accessible-name match — works for plain text labels.
+    //   2. exact `.label-name` text match — disambiguates options whose
+    //      accessible name picks up text from a codicon class (for example
+    //      "Annotation" uses `$(symbol-interface)`, so `getByRole("option",
+    //      { name: "Interface" })` matches both Interface AND Annotation).
+    //      Matching on the visible label-name text avoids that.
+    //   3. fuzzy accessible-name match — original behavior.
     const exactOption = page.getByRole("option", { name: optionText, exact: true }).locator("a");
-    const fuzzyOption = page.getByRole("option", { name: optionText }).locator("a");
-    const option = (await exactOption.count()) > 0 ? exactOption : fuzzyOption;
-    await option.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await option.click();
+    if (await exactOption.count() > 0) {
+      await exactOption.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+      await exactOption.click();
+      await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+      return;
+    }
+    const labelNameMatch = page.locator("a.label-name", { hasText: new RegExp(`^${escapeRegex(optionText)}$`) });
+    if (await labelNameMatch.count() > 0) {
+      await labelNameMatch.first().waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+      await labelNameMatch.first().click();
+      await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
+      return;
+    }
+    const fuzzyOption = page.getByRole("option", { name: optionText }).locator("a").first();
+    await fuzzyOption.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await fuzzyOption.click();
     await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },
 

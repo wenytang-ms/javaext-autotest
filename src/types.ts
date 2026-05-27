@@ -123,6 +123,13 @@ export interface TreeItemVerification {
   visible?: boolean;
   /** If true, match the tree item name exactly (not as substring) */
   exact?: boolean;
+  /**
+   * Scope the search to a single view pane (e.g. "Java Projects", "Explorer").
+   * The view is located by its pane aria-label, so multiple views in the same
+   * side-bar container can be disambiguated. When omitted, the search spans
+   * the entire page.
+   */
+  inView?: string;
 }
 
 export interface EditorTabVerification {

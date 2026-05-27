@@ -1,8 +1,23 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { DEFAULT_TIMEOUT } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
+}
+
+/**
+ * Scope a tree-item search to a single view pane (e.g. "Java Projects").
+ * VS Code wraps each view section in a `.pane` element with its title.
+ * Looking up the pane by its visible heading text is more robust than
+ * relying on view IDs, and works for both built-in and third-party views.
+ */
+function scopeForView(page: Page, viewName: string): Locator {
+  // Match a `.pane` element whose header text equals/contains the view name.
+  // VS Code wraps each side-bar view in `.pane` with a `.pane-header` containing
+  // the title — same selector used by collapseSidebarSection.
+  return page.locator(".pane").filter({
+    has: page.locator(".pane-header", { hasText: viewName }),
+  });
 }
 
 export interface TreeOperations {
@@ -14,8 +29,8 @@ export interface TreeOperations {
   expandTreeItem(name: string): Promise<void>;
   doubleClickTreeItem(name: string): Promise<void>;
   isTreeItemVisible(name: string): Promise<boolean>;
-  waitForTreeItem(name: string, timeoutMs?: number, exact?: boolean): Promise<boolean>;
-  waitForTreeItemGone(name: string, timeoutMs?: number, exact?: boolean): Promise<boolean>;
+  waitForTreeItem(name: string, timeoutMs?: number, exact?: boolean, inView?: string): Promise<boolean>;
+  waitForTreeItemGone(name: string, timeoutMs?: number, exact?: boolean, inView?: string): Promise<boolean>;
   clickTreeItemAction(itemName: string, actionLabel: string): Promise<void>;
   clickViewTitleAction(viewName: string, actionLabel: string): Promise<void>;
   waitForEditorTab(title: string, timeoutMs?: number): Promise<boolean>;
@@ -140,10 +155,11 @@ export const treeOperations: TreeOperations = {
     return page.getByRole("treeitem", { name }).isVisible();
   },
 
-  async waitForTreeItem(this: DriverContext, name: string, timeoutMs = 15_000, exact = false): Promise<boolean> {
+  async waitForTreeItem(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string): Promise<boolean> {
     const page = this.getPage();
     try {
-      await page.getByRole("treeitem", { name, exact }).first().waitFor({
+      const scope = inView ? scopeForView(page, inView) : page;
+      await scope.getByRole("treeitem", { name, exact }).first().waitFor({
         state: "visible",
         timeout: timeoutMs,
       });
@@ -153,10 +169,11 @@ export const treeOperations: TreeOperations = {
     }
   },
 
-  async waitForTreeItemGone(this: DriverContext, name: string, timeoutMs = 15_000, exact = false): Promise<boolean> {
+  async waitForTreeItemGone(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string): Promise<boolean> {
     const page = this.getPage();
     try {
-      await page.getByRole("treeitem", { name, exact }).first().waitFor({
+      const scope = inView ? scopeForView(page, inView) : page;
+      await scope.getByRole("treeitem", { name, exact }).first().waitFor({
         state: "hidden",
         timeout: timeoutMs,
       });
