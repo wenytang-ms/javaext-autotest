@@ -5,6 +5,7 @@ interface DriverContext {
   getPage(): Page;
   resolveWorkspacePlaceholders(value: unknown): unknown;
   assignKeybindingForCommand(commandId: string, args: unknown[]): Promise<string>;
+  subScreenshot?(label: string): Promise<void>;
 }
 
 export interface CommandOperations {
@@ -32,8 +33,10 @@ export const commandOperations: CommandOperations = {
 
     const palette = page.locator(SELECTORS.QUICK_INPUT);
     await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await this.subScreenshot?.(`palette-open`);
     await palette.fill(`>${label}`);
     await page.waitForTimeout(300);
+    await this.subScreenshot?.(`palette-filtered-${label}`);
 
     // Guard against silent-pass: if no visible option's label-name contains the
     // requested label (case-insensitive), Enter would dismiss the palette
@@ -63,8 +66,10 @@ export const commandOperations: CommandOperations = {
 
     const palette = page.locator(SELECTORS.QUICK_INPUT);
     await palette.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await this.subScreenshot?.(`palette-open`);
     await palette.fill(`>${label}`);
     await page.waitForTimeout(500);
+    await this.subScreenshot?.(`palette-filtered-${label}`);
 
     // Match the visible label-name text exactly (case-insensitive) to
     // disambiguate similarly-prefixed entries (e.g. "View: Close All Editors"
@@ -87,6 +92,8 @@ export const commandOperations: CommandOperations = {
         `No exact palette match for "${label}" (top entries: ${visible.slice(0, 3).map(t => t.trim()).join(" | ") || "<none>"})`
       );
     }
+    await option.hover().catch(() => { /* best effort */ });
+    await this.subScreenshot?.(`palette-highlighted-${label}`);
     await option.click();
     await page.locator(SELECTORS.QUICK_INPUT_WIDGET).waitFor({ state: "hidden", timeout: DEFAULT_TIMEOUT }).catch(() => {});
   },

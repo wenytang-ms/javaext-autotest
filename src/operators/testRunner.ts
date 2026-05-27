@@ -227,10 +227,34 @@ export class TestRunner {
 
       beforePath = await this.takeScreenshot(step.id, "before");
 
-      // Delegate action execution to ActionResolver
-      await this.actionResolver.resolve(step.action);
+      // Install a sub-screenshot sink so compound driver operations
+      // (e.g. clickViewTitleAction, contextMenuOnTreeItem) can capture
+      // intermediate UI states (menu opened, item focused, ...) between
+      // the per-step `before` and `after` snapshots. Files are written
+      // with the same global counter so chronological order = correct
+      // visual order, and the runner's own before/after files keep their
+      // canonical names for the LLM verifier (which references them by
+      // explicit path, not by dir scan).
+      let subCounter = 0;
+      const previousSink = this.driver.setSubScreenshotSink(async (label: string) => {
+        if (!this.screenshotDir) return;
+        subCounter += 1;
+        const seq = String(++this.screenshotCounter).padStart(2, "0");
+        const subN = String(subCounter).padStart(2, "0");
+        const safeLabel = label.replace(/[^a-z0-9-]+/gi, "-").replace(/^-+|-+$/g, "") || "step";
+        const fileName = `${seq}_${step.id}_sub_${subN}_${safeLabel}.png`;
+        const filePath = path.join(this.screenshotDir, fileName);
+        await this.driver.screenshot(filePath);
+      });
 
-      const afterPath = await this.takeScreenshot(step.id, "after");
+      let afterPath: string | undefined;
+      try {
+        // Delegate action execution to ActionResolver
+        await this.actionResolver.resolve(step.action);
+        afterPath = await this.takeScreenshot(step.id, "after");
+      } finally {
+        this.driver.setSubScreenshotSink(previousSink);
+      }
 
       // Delegate verification to StepVerifier (deterministic only)
       const verifyResult = await this.verifier.verify(step);

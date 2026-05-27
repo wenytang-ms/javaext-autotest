@@ -4,6 +4,7 @@ import { DEFAULT_TIMEOUT, KEYS } from "./_shared.js";
 interface DriverContext {
   getPage(): Page;
   contextMenuOnTreeItem(itemName: string, menuLabel: string): Promise<void>;
+  subScreenshot?(label: string): Promise<void>;
 }
 
 export interface FileExplorerOperations {
@@ -39,6 +40,7 @@ export const fileExplorerOperations: FileExplorerOperations = {
 
       const menu = page.locator(".monaco-menu-container .monaco-menu");
       await menu.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+      await this.subScreenshot?.(`context-menu-${itemName}-open`);
 
       // Resolve menu item using exact > exact-with-ellipsis > substring tiers.
       // Without this tiering, Playwright's default substring match silently
@@ -66,6 +68,7 @@ export const fileExplorerOperations: FileExplorerOperations = {
         state: "visible",
         timeout: DEFAULT_TIMEOUT,
       }).catch(() => { /* best effort */ });
+      await this.subScreenshot?.(`context-menu-${menuLabel}-focused`);
       await menuItem.click();
 
       // Verify the menu dismissed — proxy for "the command actually fired".
