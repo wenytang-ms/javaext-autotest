@@ -33,6 +33,7 @@ export interface TreeOperations {
   waitForTreeItemGone(name: string, timeoutMs?: number, exact?: boolean, inView?: string): Promise<boolean>;
   clickTreeItemAction(itemName: string, actionLabel: string): Promise<void>;
   clickViewTitleAction(viewName: string, actionLabel: string): Promise<void>;
+  clickEditorTitleAction(actionLabel: string): Promise<void>;
   waitForEditorTab(title: string, timeoutMs?: number): Promise<boolean>;
 }
 
@@ -360,6 +361,55 @@ export const treeOperations: TreeOperations = {
     // Hover first so VS Code marks the item as focused before the click —
     // this matches how `contextMenuOnTreeItem` drives context menus and avoids
     // the "click without hover" race that can dismiss the menu without firing.
+    await menuItem.hover();
+    await page.locator(".monaco-menu-container .action-item.focused").waitFor({
+      state: "visible",
+      timeout: DEFAULT_TIMEOUT,
+    }).catch(() => { /* best effort */ });
+    await menuItem.click();
+    await page.waitForTimeout(500);
+  },
+
+  async clickEditorTitleAction(this: DriverContext, actionLabel: string): Promise<void> {
+    const page = this.getPage();
+
+    // Editor title-bar actions live in the `.editor-actions` container of the
+    // active editor group. Hover the title first so optional actions render.
+    const activeGroup = page.locator(".editor-group-container.active").first();
+    await activeGroup.waitFor({ state: "visible", timeout: 2 * DEFAULT_TIMEOUT });
+
+    const titleArea = activeGroup.locator(".title").first();
+    await titleArea.hover().catch(() => { /* best effort */ });
+    await page.waitForTimeout(200);
+
+    // 1) Direct navigation-group action button.
+    const directAction = activeGroup.locator(".editor-actions").getByRole("button", {
+      name: actionLabel,
+      exact: true,
+    }).first();
+    if (await directAction.count() > 0) {
+      try {
+        await directAction.click({ timeout: 2000 });
+        await page.waitForTimeout(500);
+        return;
+      } catch {
+        // Fall through to overflow menu.
+      }
+    }
+
+    // 2) Overflow ("More Actions") menu.
+    const overflow = activeGroup.locator(
+      `.editor-actions a.codicon-toolbar-more, ` +
+      `.editor-actions a.action-label[aria-label*="More Actions"]`,
+    ).first();
+    await overflow.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    await overflow.click();
+    await page.waitForTimeout(300);
+
+    const menu = page.locator(".monaco-menu-container .monaco-menu, .context-view .monaco-menu").first();
+    await menu.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
+    const menuItem = menu.getByRole("menuitem", { name: actionLabel }).first();
+    await menuItem.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await menuItem.hover();
     await page.locator(".monaco-menu-container .action-item.focused").waitFor({
       state: "visible",

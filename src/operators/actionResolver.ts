@@ -119,6 +119,13 @@ export class ActionResolver {
         },
       },
       {
+        regex: /^clickEditorTitleAction\s+(.+)$/i,
+        handler: async (m) => {
+          const [actionLabel] = this.parseActionArgs(m[1], 1, "clickEditorTitleAction");
+          await d.clickEditorTitleAction(actionLabel);
+        },
+      },
+      {
         regex: /^contextMenu\s+(.+)$/i,
         handler: async (m) => {
           const [itemName, menuLabel] = this.parseActionArgs(m[1], 2, "contextMenu");
