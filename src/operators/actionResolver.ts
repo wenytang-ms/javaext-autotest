@@ -133,6 +133,13 @@ export class ActionResolver {
         },
       },
       {
+        regex: /^contextMenuSubmenu\s+(.+)$/i,
+        handler: async (m) => {
+          const [itemName, submenuLabel, leafLabel] = this.parseActionArgs(m[1], 3, "contextMenuSubmenu");
+          await d.contextMenuOnTreeItemSubmenu(itemName, submenuLabel, leafLabel);
+        },
+      },
+      {
         regex: /^click\s+(.+?)\s*(?:tree item)?$/i,
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },
