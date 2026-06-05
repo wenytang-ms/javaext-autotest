@@ -13,6 +13,7 @@ import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { VscodeDriverOptions } from "../types.js";
 import { commandOperations, type CommandOperations } from "./operations/commandOperations.js";
 import { debugOperations, type DebugOperations } from "./operations/debugOperations.js";
@@ -65,6 +66,23 @@ const KEYBINDING_POOL = [
  * < 500 ms; 1500 ms is a conservative safety margin to keep flakes out of CI.
  */
 const KEYBINDING_RELOAD_DELAY_MS = 1500;
+
+/**
+ * Convert an OS-native filesystem path to a valid `file://` URI string in a
+ * form that `vscode.Uri.parse(...).fsPath` round-trips correctly on both
+ * Windows and POSIX.
+ *
+ * On Windows (paths like `C:\Users\foo\bar.jar`):
+ *   `C:\Users\foo\bar.jar` -> `file:///C:/Users/foo/bar.jar`
+ * On POSIX (paths like `/home/runner/foo/bar.jar`):
+ *   `/home/runner/foo/bar.jar` -> `file:///home/runner/foo/bar.jar`
+ *
+ * Backed by Node's `pathToFileURL` so encoding (spaces, non-ASCII, drive
+ * letter handling) matches VS Code's `URI.file(...).toString()`.
+ */
+function pathToFileUri(fsPath: string): string {
+  return pathToFileURL(fsPath).toString();
+}
 
 interface KeybindingEntry {
   commandId: string;
@@ -509,6 +527,8 @@ export class VscodeDriver {
       const wsParent = path.dirname(wsPath);
       const resolvedHome = value.startsWith("~/") ? path.join(wsPath, value.substring(2)) : value;
       return resolvedHome
+        .replace(/\$\{workspaceFolderUri\}/g, pathToFileUri(wsPath))
+        .replace(/\$\{workspaceParentUri\}/g, pathToFileUri(wsParent))
         .replace(/\$\{workspaceFolder\}/g, wsPath)
         .replace(/\$\{workspaceParent\}/g, wsParent);
     }
