@@ -27,6 +27,7 @@ export interface TreeOperations {
   collapseSidebarSection(sectionLabel: string): Promise<void>;
   collapseWorkspaceRoot(): Promise<void>;
   clickTreeItem(name: string): Promise<void>;
+  clickTreeItemExact(name: string): Promise<void>;
   expandTreeItem(name: string): Promise<void>;
   doubleClickTreeItem(name: string): Promise<void>;
   isTreeItemVisible(name: string): Promise<boolean>;
@@ -87,6 +88,25 @@ export const treeOperations: TreeOperations = {
   async clickTreeItem(this: DriverContext, name: string): Promise<void> {
     const page = this.getPage();
     const item = page.getByRole("treeitem", { name }).locator("a").first();
+    await item.waitFor({ state: "visible", timeout: 15_000 });
+    await item.scrollIntoViewIfNeeded();
+    try {
+      await item.click({ timeout: 5_000 });
+    } catch {
+      await page.evaluate((el) => el?.scrollIntoView({ block: "center" }), await item.elementHandle());
+      await item.click({ timeout: 5_000 });
+    }
+    await page.waitForTimeout(500);
+  },
+
+  async clickTreeItemExact(this: DriverContext, name: string): Promise<void> {
+    const page = this.getPage();
+    // Exact accessible-name match — required when one tree row's label is
+    // a substring of another's (e.g. "App" vs "my-app", "App1" vs the
+    // package "com.mycompany.app1"). Default `clickTreeItem` uses
+    // case-insensitive substring matching, which would otherwise pick
+    // the first match by document order — usually a parent node.
+    const item = page.getByRole("treeitem", { name, exact: true }).locator("a").first();
     await item.waitFor({ state: "visible", timeout: 15_000 });
     await item.scrollIntoViewIfNeeded();
     try {

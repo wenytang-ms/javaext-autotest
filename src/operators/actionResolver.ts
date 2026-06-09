@@ -140,6 +140,10 @@ export class ActionResolver {
         },
       },
       {
+        regex: /^click\s+(.+?)\s+tree item\s+exact$/i,
+        handler: async (m) => { await d.clickTreeItemExact(m[1]); },
+      },
+      {
         regex: /^click\s+(.+?)\s*(?:tree item)?$/i,
         handler: async (m) => { await d.clickTreeItem(m[1]); },
       },
@@ -174,6 +178,17 @@ export class ActionResolver {
       {
         regex: /^deleteFile\s+(.+)$/i,
         handler: async (m) => { await d.deleteFile(m[1].trim()); },
+      },
+
+      // ── Clipboard ──
+      // `writeClipboard <text>` lets a plan seed the clipboard with a
+      // deterministic sentinel value before invoking a copy-* command,
+      // so the post-action `verifyClipboard` can prove the command
+      // actually wrote (rather than passing on stale clipboard content
+      // left over from an earlier step or the host OS).
+      {
+        regex: /^writeClipboard\s+(.*)$/i,
+        handler: async (m) => { await d.writeClipboard(m[1]); },
       },
 
       // ── Wait ──

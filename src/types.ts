@@ -76,6 +76,7 @@ export interface TestStep {
   verifyWebview?: WebviewVerification;
   verifyOutputChannel?: OutputChannelVerification;
   verifyTerminal?: TerminalVerification;
+  verifyClipboard?: ClipboardVerification;
   timeout?: number;
   waitBefore?: number;
   /**
@@ -165,6 +166,27 @@ export interface FileVerification {
   exists?: boolean;
   contains?: string;
   matches?: string; // regex
+}
+
+/**
+ * Verify the OS clipboard text — useful for commands that copy a value
+ * (file path, relative path, etc.) without producing any other UI signal.
+ *
+ * All assertions are evaluated against the clipboard text as read via
+ * Electron's main-process `clipboard.readText()` immediately after the
+ * step action completes.
+ */
+export interface ClipboardVerification {
+  /** Clipboard text must exactly equal this string. */
+  exact?: string;
+  /** Clipboard text must contain this substring. */
+  contains?: string;
+  /** Clipboard text must NOT contain this substring. */
+  notContains?: string;
+  /** Clipboard text must match this regex (string is fed to `new RegExp()`). */
+  matches?: string;
+  /** Clipboard text must be non-empty (length > 0). */
+  notEmpty?: boolean;
 }
 
 export interface EditorVerification {

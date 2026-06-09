@@ -57,6 +57,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
       verifyWebview: step.verifyWebview as TestStep["verifyWebview"],
       verifyOutputChannel: step.verifyOutputChannel as TestStep["verifyOutputChannel"],
       verifyTerminal: step.verifyTerminal as TestStep["verifyTerminal"],
+      verifyClipboard: step.verifyClipboard as TestStep["verifyClipboard"],
       timeout: step.timeout as number | undefined,
       waitBefore: step.waitBefore as number | undefined,
       retries: typeof step.retries === "number" ? Math.max(0, step.retries) : undefined,
