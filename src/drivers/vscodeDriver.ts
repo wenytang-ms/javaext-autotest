@@ -16,6 +16,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { VscodeDriverOptions } from "../types.js";
 import { commandOperations, type CommandOperations } from "./operations/commandOperations.js";
+import { clipboardOperations, type ClipboardOperations } from "./operations/clipboardOperations.js";
 import { debugOperations, type DebugOperations } from "./operations/debugOperations.js";
 
 import { dialogOperations, type DialogOperations } from "./operations/dialogOperations.js";
@@ -518,6 +519,16 @@ export class VscodeDriver {
     return this.page;
   }
 
+  /**
+   * Returns the underlying Playwright ElectronApplication handle, or null when
+   * the driver has not been launched yet. Exposed so operations that need to
+   * reach the Electron main process (e.g. clipboardOperations) can do so via
+   * `app.evaluate(...)` without piercing the private `this.app` field.
+   */
+  getElectronApp(): ElectronApplication | null {
+    return this.app;
+  }
+
   resolveWorkspacePlaceholders(value: unknown): unknown {
     if (typeof value === "string") {
       const wsPath = this.getWorkspacePath();
@@ -747,6 +758,7 @@ export class VscodeDriver {
 
 export interface VscodeDriver
   extends CommandOperations,
+    ClipboardOperations,
     DebugOperations,
     DialogOperations,
     EditorOperations,
@@ -762,6 +774,7 @@ export interface VscodeDriver
 Object.assign(
   VscodeDriver.prototype,
   commandOperations,
+  clipboardOperations,
   debugOperations,
   dialogOperations,
   editorOperations,

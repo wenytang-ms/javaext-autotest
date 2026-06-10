@@ -36,7 +36,8 @@ export class StepVerifier {
         && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
         && !step.verifyQuickInput && !step.verifyDialog
         && !step.verifyTreeItem && !step.verifyEditorTab
-        && !step.verifyWebview && !step.verifyOutputChannel && !step.verifyTerminal) {
+        && !step.verifyWebview && !step.verifyOutputChannel && !step.verifyTerminal
+        && !step.verifyClipboard) {
       return { passed: true };
     }
 
@@ -77,6 +78,9 @@ export class StepVerifier {
 
     const terminalResult = await this.verifyTerminalCheck(step);
     if (terminalResult && !terminalResult.passed) return terminalResult;
+
+    const clipboardResult = await this.verifyClipboardCheck(step);
+    if (clipboardResult && !clipboardResult.passed) return clipboardResult;
 
     return { passed: true };
   }
@@ -450,6 +454,60 @@ export class StepVerifier {
         }
         if (notContains && text.includes(notContains)) {
           return { passed: false, reason: `Terminal unexpectedly contains: "${notContains}"` };
+        }
+        return { passed: true };
+      },
+    });
+  }
+
+  private async verifyClipboardCheck(step: TestStep): Promise<VerifyResult | null> {
+    if (!step.verifyClipboard) return null;
+
+    const { exact, contains, notContains, matches, notEmpty } = step.verifyClipboard;
+
+    let re: RegExp | undefined;
+    if (matches !== undefined) {
+      try {
+        re = new RegExp(matches);
+      } catch (e) {
+        return { passed: false, reason: `Invalid regex in verifyClipboard.matches: "${matches}" — ${(e as Error).message}` };
+      }
+    }
+
+    let text = "";
+
+    return pollUntil<VerifyResult>(step, {
+      waitFn: (s) => this.driver.wait(s),
+      check: async () => {
+        text = await this.driver.readClipboard();
+
+        const exactOk = exact === undefined || text === exact;
+        const containsOk = contains === undefined || text.includes(contains);
+        const notContainsOk = notContains === undefined || !text.includes(notContains);
+        const matchesOk = re === undefined || re.test(text);
+        const notEmptyOk = !notEmpty || text.length > 0;
+
+        if (exactOk && containsOk && notContainsOk && matchesOk && notEmptyOk) {
+          return { done: true, result: { passed: true } };
+        }
+        return { done: false };
+      },
+      onTimeout: async () => {
+        const snippet = text.length > 500 ? text.slice(0, 500) + "…(truncated)" : text;
+        if (exact !== undefined && text !== exact) {
+          return { passed: false, reason: `Clipboard text mismatch.\n  expected (exact): ${JSON.stringify(exact)}\n  actual:           ${JSON.stringify(snippet)}` };
+        }
+        if (contains !== undefined && !text.includes(contains)) {
+          return { passed: false, reason: `Clipboard does not contain: "${contains}". Clipboard text: ${JSON.stringify(snippet)}` };
+        }
+        if (notContains !== undefined && text.includes(notContains)) {
+          return { passed: false, reason: `Clipboard unexpectedly contains: "${notContains}". Clipboard text: ${JSON.stringify(snippet)}` };
+        }
+        if (re !== undefined && !re.test(text)) {
+          return { passed: false, reason: `Clipboard does not match regex: /${matches}/. Clipboard text: ${JSON.stringify(snippet)}` };
+        }
+        if (notEmpty && text.length === 0) {
+          return { passed: false, reason: "Clipboard is empty (expected non-empty)." };
         }
         return { passed: true };
       },
