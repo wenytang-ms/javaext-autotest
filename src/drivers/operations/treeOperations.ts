@@ -21,6 +21,36 @@ function scopeForView(page: Page, viewName: string): Locator {
   });
 }
 
+/** Escape a string so it can be embedded as a literal inside a RegExp. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Locate tree items by their visible label.
+ *
+ * Substring matches (`exact === false`) keep VS Code's default accessible-name
+ * behaviour. Exact matches deliberately avoid Playwright's
+ * `getByRole("treeitem", { name, exact })`: that compares the row's *accessible
+ * name*, which VS Code decorates with extra, release-dependent text (selection /
+ * collapse state, description, positional a11y hints). VS Code 1.125 began
+ * appending such text, so every `exact` lookup silently stopped matching even
+ * though the row was on screen. The node's visible name lives in its own
+ * `.label-name` element (any description renders in a separate
+ * `.label-description`), so anchoring on that element's text yields a
+ * release-stable exact match while still disambiguating siblings whose names
+ * are substrings of one another (e.g. "App" vs "my-app").
+ */
+function treeItemByLabel(page: Page, name: string, exact: boolean, inView?: string): Locator {
+  const scope = inView ? scopeForView(page, inView) : page;
+  if (!exact) {
+    return scope.getByRole("treeitem", { name });
+  }
+  return scope.getByRole("treeitem").filter({
+    has: page.locator(".label-name", { hasText: new RegExp(`^${escapeRegex(name)}$`) }),
+  });
+}
+
 export interface TreeOperations {
   activeSideTab(tabName: string): Promise<void>;
   isSideTabVisible(tabName: string): Promise<boolean>;
@@ -106,7 +136,7 @@ export const treeOperations: TreeOperations = {
     // package "com.mycompany.app1"). Default `clickTreeItem` uses
     // case-insensitive substring matching, which would otherwise pick
     // the first match by document order — usually a parent node.
-    const item = page.getByRole("treeitem", { name, exact: true }).locator("a").first();
+    const item = treeItemByLabel(page, name, true).locator("a").first();
     await item.waitFor({ state: "visible", timeout: 15_000 });
     await item.scrollIntoViewIfNeeded();
     try {
@@ -120,7 +150,7 @@ export const treeOperations: TreeOperations = {
 
   async expandTreeItem(this: DriverContext, name: string): Promise<void> {
     const page = this.getPage();
-    const exactItem = page.getByRole("treeitem", { name, exact: true }).first();
+    const exactItem = treeItemByLabel(page, name, true).first();
     const item = await exactItem.count() > 0 ? exactItem : page.getByRole("treeitem", { name }).first();
     await item.waitFor({ state: "visible", timeout: 15_000 });
     await item.scrollIntoViewIfNeeded();
@@ -180,8 +210,7 @@ export const treeOperations: TreeOperations = {
   async waitForTreeItem(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string): Promise<boolean> {
     const page = this.getPage();
     try {
-      const scope = inView ? scopeForView(page, inView) : page;
-      await scope.getByRole("treeitem", { name, exact }).first().waitFor({
+      await treeItemByLabel(page, name, exact, inView).first().waitFor({
         state: "visible",
         timeout: timeoutMs,
       });
@@ -194,8 +223,7 @@ export const treeOperations: TreeOperations = {
   async waitForTreeItemGone(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string): Promise<boolean> {
     const page = this.getPage();
     try {
-      const scope = inView ? scopeForView(page, inView) : page;
-      await scope.getByRole("treeitem", { name, exact }).first().waitFor({
+      await treeItemByLabel(page, name, exact, inView).first().waitFor({
         state: "hidden",
         timeout: timeoutMs,
       });
@@ -207,7 +235,7 @@ export const treeOperations: TreeOperations = {
 
   async clickTreeItemAction(this: DriverContext, itemName: string, actionLabel: string): Promise<void> {
     const page = this.getPage();
-    const exactItem = page.getByRole("treeitem", { name: itemName, exact: true }).first();
+    const exactItem = treeItemByLabel(page, itemName, true).first();
     const target = await exactItem.count() > 0
       ? exactItem
       : page.getByRole("treeitem", { name: itemName }).first();
