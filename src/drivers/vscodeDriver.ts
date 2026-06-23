@@ -311,11 +311,16 @@ export class VscodeDriver {
       "java.help.firstView": "none",
       "java.configuration.checkProjectSettingsExclusions": false,
       "extensions.ignoreRecommendations": true,
-      "telemetry.telemetryLevel": "off",
       "update.showReleaseNotes": false,
       "workbench.enableExperiments": false,
-      "redhat.telemetry.enabled": false,
       ...this.options.settings,
+      // Telemetry is always disabled for test isolation and must never be
+      // re-enabled by a per-plan `settings` block, so keep these after the
+      // spread. `telemetry.telemetryLevel: off` disables VS Code core and
+      // Microsoft (vscjava.*) extension telemetry; `redhat.telemetry.enabled`
+      // disables Red Hat (redhat.java) extension telemetry.
+      "telemetry.telemetryLevel": "off",
+      "redhat.telemetry.enabled": false,
     };
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
