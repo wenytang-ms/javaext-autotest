@@ -79,11 +79,9 @@ export const languageServerOperations: LanguageServerOperations = {
   async waitForLanguageServer(this: DriverContext, timeoutMs = 120_000): Promise<boolean> {
     const page = this.getPage();
     const start = Date.now();
-    const pollInterval = 2000;
 
     console.log(`   ⏳ Waiting for Language Server (timeout: ${timeoutMs / 1000}s)...`);
 
-    let lastStatus = "";
     const readStatus = async (): Promise<string> => {
       const statusItems = page.locator("footer a, footer [role='button']");
       const count = await statusItems.count();
@@ -95,37 +93,38 @@ export const languageServerOperations: LanguageServerOperations = {
       return "";
     };
 
-    while (Date.now() - start < timeoutMs) {
-      const currentStatus = await readStatus();
-      if (currentStatus && currentStatus !== lastStatus) {
-        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-        console.log(`   ⏳ ${elapsed}s — "${currentStatus}"`);
-        lastStatus = currentStatus;
-      }
+    // Event-driven readiness: Playwright auto-waits for the status-bar item
+    // whose text reports "Java: Ready" (or the 👍 icon), watching DOM mutations
+    // instead of fixed-interval polling. Timeout resolves to false to preserve
+    // the soft-failure contract that callers/plans rely on (never throws).
+    const ready = await page
+      .locator("footer a, footer [role='button']")
+      .filter({ hasText: /Java:\s*Ready|👍/ })
+      .first()
+      .waitFor({ state: "visible", timeout: timeoutMs })
+      .then(() => true)
+      .catch(() => false);
 
-      if (/Java:\s*Ready/i.test(currentStatus) || currentStatus.includes("👍")) {
-        const readyElapsed = ((Date.now() - start) / 1000).toFixed(1);
-        console.log(`   ✅ Language Server ready (${readyElapsed}s)`);
-
-        // Stability hold: after Ready, the status frequently transitions to
-        // "Java: Building - 0%" within a few seconds while the workspace
-        // indexes. Wait briefly for Build to either (a) never appear, or
-        // (b) appear and then complete, so AFTER-screenshots are taken on a
-        // settled status line. The hold is bounded by both
-        // POST_READY_BUILD_SETTLE_MS and any remaining caller budget, and
-        // never downgrades a successful Ready to a failure.
-        const remainingBudget = Math.max(0, timeoutMs - (Date.now() - start));
-        const holdBudget = Math.min(POST_READY_BUILD_SETTLE_MS, remainingBudget);
-        if (holdBudget > 0) {
-          await waitForPostReadySettle(page, readStatus, holdBudget);
-        }
-        return true;
-      }
-
-      await page.waitForTimeout(pollInterval);
+    if (!ready) {
+      const lastStatus = await readStatus();
+      console.log(`   ⚠️ Language Server not ready after ${timeoutMs / 1000}s (last: "${lastStatus}")`);
+      return false;
     }
 
-    console.log(`   ⚠️ Language Server not ready after ${timeoutMs / 1000}s (last: "${lastStatus}")`);
-    return false;
+    const readyElapsed = ((Date.now() - start) / 1000).toFixed(1);
+    console.log(`   ✅ Language Server ready (${readyElapsed}s)`);
+
+    // Stability hold: after Ready, the status frequently transitions to
+    // "Java: Building - 0%" within a few seconds while the workspace indexes.
+    // Wait briefly for Build to either (a) never appear, or (b) appear and then
+    // complete, so AFTER-screenshots are taken on a settled status line. The
+    // hold is bounded by both POST_READY_BUILD_SETTLE_MS and any remaining
+    // caller budget, and never downgrades a successful Ready to a failure.
+    const remainingBudget = Math.max(0, timeoutMs - (Date.now() - start));
+    const holdBudget = Math.min(POST_READY_BUILD_SETTLE_MS, remainingBudget);
+    if (holdBudget > 0) {
+      await waitForPostReadySettle(page, readStatus, holdBudget);
+    }
+    return true;
   },
 };
