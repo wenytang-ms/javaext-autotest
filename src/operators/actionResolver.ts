@@ -315,6 +315,10 @@ export class ActionResolver {
         handler: async (m) => { await d.hoverOnText(m[1].trim()); },
       },
       {
+        regex: /^clickHoverAction\s+(.+)$/i,
+        handler: async (m) => { await d.clickHoverAction(m[1].trim()); },
+      },
+      {
         regex: /^dismissHover$/i,
         handler: async () => { await d.dismissHover(); },
       },

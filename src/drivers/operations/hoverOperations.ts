@@ -17,14 +17,23 @@ export const hoverOperations: HoverOperations = {
     const page = this.getPage();
     const target = page.locator(".monaco-editor .view-lines").getByText(text, { exact: false }).first();
     await target.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
-    await target.hover();
 
-    const hoverWidget = page.locator(".monaco-hover");
-    const visible = await hoverWidget.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT })
-      .then(() => true).catch(() => false);
-    if (!visible) {
-      throw new Error(`Hover popup did not appear for "${text}"`);
+    const hoverWidget = page.locator(".monaco-editor-hover, .monaco-hover")
+      .filter({ has: page.locator(".hover-row, .monaco-hover-content") }).first();
+    // The hover popup renders only after the mouse dwells over the token, and
+    // a single hover() may not register the dwell. Retry the hover until the
+    // popup DOM node becomes visible. With `editor.hover.sticky: true` it stays
+    // mounted once shown, so visibility is the only signal we need — no fixed
+    // sleep is required to keep it up for the after-step screenshot.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await target.hover();
+      const visible = await hoverWidget.waitFor({ state: "visible", timeout: 4000 })
+        .then(() => true).catch(() => false);
+      if (visible) {
+        return;
+      }
     }
+    throw new Error(`Hover popup did not appear for "${text}"`);
   },
 
   async getHoverContent(this: DriverContext): Promise<string> {
