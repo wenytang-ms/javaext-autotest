@@ -422,15 +422,31 @@ export class StepVerifier {
     if (!step.verifyOutputChannel) return null;
 
     const { channel, contains, notContains } = step.verifyOutputChannel;
-    const text = await this.driver.getOutputChannelText(channel);
+    let text = "";
 
-    if (contains && !text.includes(contains)) {
-      return { passed: false, reason: `Output channel "${channel}" does not contain: "${contains}"` };
-    }
-    if (notContains && text.includes(notContains)) {
-      return { passed: false, reason: `Output channel "${channel}" unexpectedly contains: "${notContains}"` };
-    }
-    return { passed: true };
+    return pollUntil<VerifyResult>(step, {
+      waitFn: (s) => this.driver.wait(s),
+      check: async () => {
+        text = await this.driver.getOutputChannelText(channel);
+        if (notContains && text.includes(notContains)) {
+          return {
+            done: true,
+            result: {
+              passed: false,
+              reason: `Output channel "${channel}" unexpectedly contains: "${notContains}"`,
+            },
+          };
+        }
+        if (!contains || text.includes(contains)) {
+          return { done: true, result: { passed: true } };
+        }
+        return { done: false };
+      },
+      onTimeout: async () => ({
+        passed: false,
+        reason: `Output channel "${channel}" does not contain: "${contains}". Output text: ${text.slice(-1000)}`,
+      }),
+    });
   }
 
   private async verifyTerminalCheck(step: TestStep): Promise<VerifyResult | null> {

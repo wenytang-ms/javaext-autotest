@@ -65,6 +65,10 @@ function loadDotEnv(envPath: string): boolean {
 // Auto-load .env from CWD at CLI startup (before any subcommand runs).
 loadDotEnv(path.resolve(process.cwd(), ".env"));
 
+const packageMetadata = JSON.parse(
+  fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+) as { version: string };
+
 /** Generate markdown summary from test reports */
 function generateSummary(reports: Array<any>): {
   mdLines: string[];
@@ -134,7 +138,7 @@ const program = new Command();
 program
   .name("autotest")
   .description("AI-driven VSCode extension E2E testing framework")
-  .version("0.1.0");
+  .version(packageMetadata.version);
 
 program
   .command("run <plan>")

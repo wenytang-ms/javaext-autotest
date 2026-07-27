@@ -269,21 +269,75 @@ export const commandOperations: CommandOperations = {
     ).catch(() => []);
     const buffers = await page.evaluate(async () => {
       const driver = (window as unknown as { driver?: { getTerminalBuffer?: (selector: string) => Promise<string[]> } }).driver;
-      const terminals = Array.from(document.querySelectorAll(".terminal-wrapper .xterm, .xterm"));
+      const terminals = Array.from(document.querySelectorAll<HTMLElement>(".terminal-wrapper .xterm, .xterm"));
       const output: string[] = [];
       for (let index = 0; index < terminals.length; index++) {
-        const selector = `.terminal-wrapper .xterm:nth-of-type(${index + 1}), .xterm:nth-of-type(${index + 1})`;
-        try {
-          if (driver?.getTerminalBuffer) {
-            output.push((await driver.getTerminalBuffer(selector)).join("\n"));
+        const terminal = terminals[index];
+        const xterm = (terminal as HTMLElement & {
+          xterm?: {
+            buffer?: {
+              active?: {
+                length: number;
+                getLine(line: number): { translateToString(trimRight?: boolean): string } | undefined;
+              };
+            };
+          };
+        }).xterm;
+        const activeBuffer = xterm?.buffer?.active;
+        if (activeBuffer) {
+          const lines: string[] = [];
+          for (let lineIndex = 0; lineIndex < activeBuffer.length; lineIndex++) {
+            const line = activeBuffer.getLine(lineIndex);
+            if (line) lines.push(line.translateToString(true));
           }
+          output.push(lines.join("\n"));
+          continue;
+        }
+        if (!driver?.getTerminalBuffer) continue;
+
+        const attribute = "data-autotest-terminal-index";
+        const previousValue = terminal.getAttribute(attribute);
+        const value = String(index);
+        terminal.setAttribute(attribute, value);
+        try {
+          output.push((await driver.getTerminalBuffer(`[${attribute}="${value}"]`)).join("\n"));
         } catch {
           // Fall back to DOM text below.
+        } finally {
+          if (previousValue === null) {
+            terminal.removeAttribute(attribute);
+          } else {
+            terminal.setAttribute(attribute, previousValue);
+          }
         }
       }
       return output;
     }).catch(() => []);
-    const raw = [...texts, ...buffers].join("\n--- terminal ---\n");
+    const ariaSnapshots: string[] = [];
+    const visibleTerminals = page.locator(".terminal-wrapper:visible");
+    for (let index = 0; index < await visibleTerminals.count(); index++) {
+      const snapshot = await visibleTerminals.nth(index).ariaSnapshot().catch(() => "");
+      if (snapshot) ariaSnapshots.push(snapshot);
+    }
+    let accessibleBuffer = "";
+    if (![...texts, ...buffers].some(text => text.trim().length > 0)) {
+      const keybinding = await this.assignKeybindingForCommand(
+        "workbench.action.terminal.focusAccessibleBuffer",
+        [],
+      );
+      await page.keyboard.press(keybinding);
+      const accessibleView = page.locator(".accessible-view:visible").first();
+      const opened = await accessibleView.waitFor({ state: "visible", timeout: 2_000 })
+        .then(() => true)
+        .catch(() => false);
+      if (opened) {
+        accessibleBuffer = await accessibleView.locator(".view-lines").innerText()
+          .catch(() => accessibleView.innerText().catch(() => ""));
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(100);
+      }
+    }
+    const raw = [...texts, ...buffers, ...ariaSnapshots, accessibleBuffer].join("\n--- terminal ---\n");
     return raw.replace(/\u00A0/g, " ");
   },
 

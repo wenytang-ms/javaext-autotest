@@ -16,9 +16,11 @@ function scopeForView(page: Page, viewName: string): Locator {
   // Match a `.pane` element whose header text equals/contains the view name.
   // VS Code wraps each side-bar view in `.pane` with a `.pane-header` containing
   // the title — same selector used by collapseSidebarSection.
-  return page.locator(".pane").filter({
-    has: page.locator(".pane-header", { hasText: viewName }),
-  });
+  return page.locator(".pane")
+    .filter({
+      has: page.locator(".pane-header", { hasText: viewName }),
+    })
+    .filter({ visible: true });
 }
 
 /** Escape a string so it can be embedded as a literal inside a RegExp. */
@@ -43,12 +45,12 @@ function escapeRegex(value: string): string {
  */
 function treeItemByLabel(page: Page, name: string, exact: boolean, inView?: string): Locator {
   const scope = inView ? scopeForView(page, inView) : page;
-  if (!exact) {
-    return scope.getByRole("treeitem", { name });
-  }
-  return scope.getByRole("treeitem").filter({
-    has: page.locator(".label-name", { hasText: new RegExp(`^${escapeRegex(name)}$`) }),
-  });
+  const matches = exact
+    ? scope.getByRole("treeitem").filter({
+      has: page.locator(".label-name", { hasText: new RegExp(`^${escapeRegex(name)}$`) }),
+    })
+    : scope.getByRole("treeitem", { name });
+  return matches.filter({ visible: true });
 }
 
 export interface TreeOperations {
@@ -117,7 +119,7 @@ export const treeOperations: TreeOperations = {
 
   async clickTreeItem(this: DriverContext, name: string): Promise<void> {
     const page = this.getPage();
-    const item = page.getByRole("treeitem", { name }).locator("a").first();
+    const item = treeItemByLabel(page, name, false).locator("a").first();
     await item.waitFor({ state: "visible", timeout: 15_000 });
     await item.scrollIntoViewIfNeeded();
     try {
@@ -151,7 +153,7 @@ export const treeOperations: TreeOperations = {
   async expandTreeItem(this: DriverContext, name: string): Promise<void> {
     const page = this.getPage();
     const exactItem = treeItemByLabel(page, name, true).first();
-    const item = await exactItem.count() > 0 ? exactItem : page.getByRole("treeitem", { name }).first();
+    const item = await exactItem.count() > 0 ? exactItem : treeItemByLabel(page, name, false).first();
     await item.waitFor({ state: "visible", timeout: 15_000 });
     await item.scrollIntoViewIfNeeded();
 
@@ -195,7 +197,9 @@ export const treeOperations: TreeOperations = {
 
   async doubleClickTreeItem(this: DriverContext, name: string): Promise<void> {
     const page = this.getPage();
-    const item = page.getByRole("treeitem", { name }).locator("a").first();
+    const exactItem = treeItemByLabel(page, name, true).first();
+    const target = await exactItem.count() > 0 ? exactItem : treeItemByLabel(page, name, false).first();
+    const item = target.locator("a").first();
     await item.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     await item.scrollIntoViewIfNeeded();
     await item.dblclick();
@@ -204,7 +208,7 @@ export const treeOperations: TreeOperations = {
 
   async isTreeItemVisible(this: DriverContext, name: string): Promise<boolean> {
     const page = this.getPage();
-    return page.getByRole("treeitem", { name }).isVisible();
+    return treeItemByLabel(page, name, false).first().isVisible();
   },
 
   async waitForTreeItem(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string): Promise<boolean> {
@@ -238,7 +242,7 @@ export const treeOperations: TreeOperations = {
     const exactItem = treeItemByLabel(page, itemName, true).first();
     const target = await exactItem.count() > 0
       ? exactItem
-      : page.getByRole("treeitem", { name: itemName }).first();
+      : treeItemByLabel(page, itemName, false).first();
     await target.waitFor({ state: "visible", timeout: 15_000 });
 
     let lastActionInfo: unknown;
