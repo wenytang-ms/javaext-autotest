@@ -35,7 +35,7 @@ npx autotest analyze test-results
 
 ### Requirements
 
-- Node.js >= 18
+- Node.js >= 22
 - JDK installed for Java extension tests
 - The `vscode-java` repository cloned locally when a test plan references its sample projects
 
