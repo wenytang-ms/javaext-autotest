@@ -43,13 +43,18 @@ function escapeRegex(value: string): string {
  * release-stable exact match while still disambiguating siblings whose names
  * are substrings of one another (e.g. "App" vs "my-app").
  */
-function treeItemByLabel(page: Page, name: string, exact: boolean, inView?: string): Locator {
+function treeItemByLabel(page: Page, name: string, exact: boolean, inView?: string, level?: number): Locator {
   const scope = inView ? scopeForView(page, inView) : page;
+  const treeItems = level === undefined
+    ? scope.getByRole("treeitem")
+    : scope.locator(`[role="treeitem"][aria-level="${level}"]`);
   const matches = exact
-    ? scope.getByRole("treeitem").filter({
+    ? treeItems.filter({
       has: page.locator(".label-name", { hasText: new RegExp(`^${escapeRegex(name)}$`) }),
     })
-    : scope.getByRole("treeitem", { name });
+    : level === undefined
+      ? scope.getByRole("treeitem", { name })
+      : treeItems.filter({ hasText: new RegExp(escapeRegex(name), "i") });
   return matches.filter({ visible: true });
 }
 
@@ -63,8 +68,9 @@ export interface TreeOperations {
   expandTreeItem(name: string): Promise<void>;
   doubleClickTreeItem(name: string): Promise<void>;
   isTreeItemVisible(name: string): Promise<boolean>;
-  waitForTreeItem(name: string, timeoutMs?: number, exact?: boolean, inView?: string): Promise<boolean>;
-  waitForTreeItemGone(name: string, timeoutMs?: number, exact?: boolean, inView?: string): Promise<boolean>;
+  waitForTreeItem(name: string, timeoutMs?: number, exact?: boolean, inView?: string, level?: number): Promise<boolean>;
+  waitForTreeItemGone(name: string, timeoutMs?: number, exact?: boolean, inView?: string, level?: number): Promise<boolean>;
+  waitForTreeItemCount(name: string, expectedCount: number, timeoutMs?: number, exact?: boolean, inView?: string, level?: number): Promise<boolean>;
   clickTreeItemAction(itemName: string, actionLabel: string): Promise<void>;
   clickViewTitleAction(viewName: string, actionLabel: string): Promise<void>;
   clickEditorTitleAction(actionLabel: string): Promise<void>;
@@ -211,10 +217,10 @@ export const treeOperations: TreeOperations = {
     return treeItemByLabel(page, name, false).first().isVisible();
   },
 
-  async waitForTreeItem(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string): Promise<boolean> {
+  async waitForTreeItem(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string, level?: number): Promise<boolean> {
     const page = this.getPage();
     try {
-      await treeItemByLabel(page, name, exact, inView).first().waitFor({
+      await treeItemByLabel(page, name, exact, inView, level).first().waitFor({
         state: "visible",
         timeout: timeoutMs,
       });
@@ -224,10 +230,10 @@ export const treeOperations: TreeOperations = {
     }
   },
 
-  async waitForTreeItemGone(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string): Promise<boolean> {
+  async waitForTreeItemGone(this: DriverContext, name: string, timeoutMs = 15_000, exact = false, inView?: string, level?: number): Promise<boolean> {
     const page = this.getPage();
     try {
-      await treeItemByLabel(page, name, exact, inView).first().waitFor({
+      await treeItemByLabel(page, name, exact, inView, level).first().waitFor({
         state: "hidden",
         timeout: timeoutMs,
       });
@@ -235,6 +241,27 @@ export const treeOperations: TreeOperations = {
     } catch {
       return false;
     }
+  },
+
+  async waitForTreeItemCount(
+    this: DriverContext,
+    name: string,
+    expectedCount: number,
+    timeoutMs = 15_000,
+    exact = false,
+    inView?: string,
+    level?: number,
+  ): Promise<boolean> {
+    const page = this.getPage();
+    const matches = treeItemByLabel(page, name, exact, inView, level);
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (await matches.count() === expectedCount) {
+        return true;
+      }
+      await page.waitForTimeout(Math.min(100, Math.max(0, deadline - Date.now())));
+    } while (Date.now() < deadline);
+    return await matches.count() === expectedCount;
   },
 
   async clickTreeItemAction(this: DriverContext, itemName: string, actionLabel: string): Promise<void> {

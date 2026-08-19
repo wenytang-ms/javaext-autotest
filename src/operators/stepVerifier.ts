@@ -364,15 +364,52 @@ export class StepVerifier {
 
     const expectVisible = step.verifyTreeItem.visible !== false; // default true
     const exact = step.verifyTreeItem.exact ?? false;
+    const expectedCount = step.verifyTreeItem.count;
+    const level = step.verifyTreeItem.level;
     const timeoutMs = (step.timeout ?? DEFAULT_TREE_ITEM_TIMEOUT_S) * 1000;
 
+    if (expectedCount !== undefined) {
+      if (!Number.isInteger(expectedCount) || expectedCount < 0) {
+        return { passed: false, reason: `Tree item count must be a non-negative integer, got ${expectedCount}` };
+      }
+      if (level !== undefined && (!Number.isInteger(level) || level < 1)) {
+        return { passed: false, reason: `Tree item level must be a positive integer, got ${level}` };
+      }
+      const matched = await this.driver.waitForTreeItemCount(
+        step.verifyTreeItem.name,
+        expectedCount,
+        timeoutMs,
+        exact,
+        step.verifyTreeItem.inView,
+        level,
+      );
+      if (!matched) {
+        return {
+          passed: false,
+          reason: `Expected ${expectedCount} visible tree item(s) named "${step.verifyTreeItem.name}"` +
+            `${level === undefined ? "" : ` at level ${level}`}` +
+            `${step.verifyTreeItem.inView ? ` in view "${step.verifyTreeItem.inView}"` : ""}` +
+            ` within ${timeoutMs / 1000}s`,
+        };
+      }
+      return { passed: true };
+    }
+
+    if (level !== undefined && (!Number.isInteger(level) || level < 1)) {
+      return { passed: false, reason: `Tree item level must be a positive integer, got ${level}` };
+    }
+
     if (expectVisible) {
-      const found = await this.driver.waitForTreeItem(step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView);
+      const found = await this.driver.waitForTreeItem(
+        step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView, level,
+      );
       if (!found) {
         return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not appear within ${timeoutMs / 1000}s${step.verifyTreeItem.inView ? ` in view "${step.verifyTreeItem.inView}"` : ""}` };
       }
     } else {
-      const gone = await this.driver.waitForTreeItemGone(step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView);
+      const gone = await this.driver.waitForTreeItemGone(
+        step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView, level,
+      );
       if (!gone) {
         return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not disappear within ${timeoutMs / 1000}s${step.verifyTreeItem.inView ? ` in view "${step.verifyTreeItem.inView}"` : ""}` };
       }
