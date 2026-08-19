@@ -124,6 +124,10 @@ export interface TreeItemVerification {
   visible?: boolean;
   /** If true, match the tree item name exactly (not as substring) */
   exact?: boolean;
+  /** Expected number of visible matching tree items. When set, this is authoritative over `visible`. */
+  count?: number;
+  /** Restrict matches to this 1-based tree depth (`aria-level`). */
+  level?: number;
   /**
    * Scope the search to a single view pane (e.g. "Java Projects", "Explorer").
    * The view is located by its pane aria-label, so multiple views in the same

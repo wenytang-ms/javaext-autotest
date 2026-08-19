@@ -78,6 +78,8 @@ steps:
       name: "my-app"
       visible: true          # true (default) = must appear, false = must disappear
       exact: false           # true = exact name match (avoid "App" matching "AppToDelete")
+      count: 1               # optional exact number of visible matches
+      level: 1               # optional 1-based tree depth (aria-level)
     verifyEditorTab:         # verify editor tab exists
       title: "App.java"
     verifyDialog:

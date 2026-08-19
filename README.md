@@ -140,7 +140,7 @@ ActionResolver uses a deterministic regex dictionary. Unmatched actions are exec
 | `verifyCompletion` | object | Completion list checks with `notEmpty`, `contains`, and `excludes` |
 | `verifyQuickInput` | object | Quick Input validation checks with `noError`, `messageContains`, and `messageExcludes` |
 | `verifyDialog` | object | Modal dialog visibility/content with `visible` and `contains` |
-| `verifyTreeItem` | object | Tree item appearance/disappearance with `name`, `visible`, and `exact` |
+| `verifyTreeItem` | object | Tree item appearance/disappearance with `name`, `visible`, `exact`, optional visible `count`, and optional 1-based `level` (`aria-level`) |
 | `verifyEditorTab` | object | Editor tab title appearance |
 | `verifyWebview` | object | Active webview text checks with `contains` and `notContains` |
 | `verifyOutputChannel` | object | Output channel text checks with `channel`, `contains`, and `notContains` |
