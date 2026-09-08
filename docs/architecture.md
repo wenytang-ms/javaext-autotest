@@ -114,6 +114,11 @@ The class itself keeps lifecycle and shared state:
 - Setup-time monkey patches and workspace path helpers.
 - Private cleanup helpers.
 
+Temporary directories are resolved to their canonical filesystem paths before
+creating user-data directories, isolated workspaces, or single-file copies.
+This avoids Windows short-path aliases making files opened by a language server
+appear to be outside the workspace. Workspace placeholders use the same paths.
+
 Feature-specific Driver methods live in operation modules under `src/drivers/operations`. These modules are mixed into `VscodeDriver.prototype` at the bottom of `vscodeDriver.ts`:
 
 ```typescript

@@ -132,7 +132,7 @@ export class VscodeDriver {
     const vscodePath = await downloadAndUnzipVSCode(version);
     const [cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
 
-    const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "autotest-"));
+    const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(this.getTemporaryDirectory(), "autotest-"));
     const extensionsDir = baseArgs.find(a => a.startsWith("--extensions-dir="))?.split("=")[1];
     const extensionDevelopmentPaths = [
       ...(this.options.extensionPath ? [this.options.extensionPath] : []),
@@ -248,7 +248,7 @@ export class VscodeDriver {
         openedWorkspacePath = worktreeDir;
       } else {
         // Fallback: copy workspace to temp dir (for non-git workspaces)
-        const tmpDir = os.tmpdir();
+        const tmpDir = this.getTemporaryDirectory();
         const fixedDir = path.join(tmpDir, "autotest-workspace");
         try {
           for (const entry of fs.readdirSync(tmpDir)) {
@@ -281,7 +281,7 @@ export class VscodeDriver {
       }
     } else if (this.options.filePath) {
       // Single file mode — copy the file to a temp dir and open it directly
-      const tmpDir = os.tmpdir();
+      const tmpDir = this.getTemporaryDirectory();
       const fixedDir = path.join(tmpDir, "autotest-workspace");
       if (fs.existsSync(fixedDir)) fs.rmSync(fixedDir, { recursive: true, force: true });
       fs.mkdirSync(fixedDir, { recursive: true });
@@ -677,6 +677,12 @@ export class VscodeDriver {
   //  Private helpers
   // ═══════════════════════════════════════════════════════
 
+  private getTemporaryDirectory(): string {
+    // Windows TEMP may use an 8.3 alias. Match the canonical file URIs returned
+    // by language servers so VS Code recognizes their files as workspace members.
+    return fs.realpathSync.native(os.tmpdir());
+  }
+
   /** Find the git repository root for a given path */
   private findGitRoot(dirPath: string): string | null {
     try {
@@ -699,7 +705,7 @@ export class VscodeDriver {
     const gitRoot = this.findGitRoot(workspacePath);
     if (!gitRoot) return null;
 
-    const tmpDir = os.tmpdir();
+    const tmpDir = this.getTemporaryDirectory();
 
     // Clean up ALL stale autotest-worktree-* directories from previous runs
     try {
