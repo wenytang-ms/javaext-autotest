@@ -1,6 +1,6 @@
 # VSCode AutoTest Architecture
 
-VSCode AutoTest is a deterministic end-to-end testing framework for VS Code extensions. A YAML test plan describes setup, actions, and expected outcomes. The framework launches VS Code through Playwright Electron, executes action primitives, runs deterministic verifications, captures screenshots, and optionally asks an LLM to analyze failures.
+VSCode AutoTest is an end-to-end testing framework for VS Code extensions. A YAML test plan describes setup, actions, and expected outcomes. The framework launches VS Code through Playwright Electron, executes action primitives, runs verifications, captures screenshots, and can optionally collect a portable evidence bundle for pass audits, failure root-cause analysis, and matrix summaries.
 
 The core design goal is to keep test plans stable and readable while isolating all brittle VS Code UI automation details inside the Driver layer.
 
@@ -22,6 +22,7 @@ TestRunner
   - loops over steps
   - captures before/after screenshots
   - records results
+  - optionally writes a case evidence bundle
   |
   +--> ActionResolver
   |      - maps action strings to Driver methods
@@ -32,9 +33,14 @@ TestRunner
   |      - runs deterministic checks
   |      - decides pass/fail
   |
+  +--> EvidenceCollector
+  |      - opt-in test-only probe
+  |      - scenario, execution, diagnostics, logs, screenshots, environment
+  |
   +--> LLMClient
-         - optional failure analysis only
-         - never decides pass/fail
+         - existing per-step screenshot verification
+         - opt-in case pass audit / failure RCA
+         - opt-in matrix summary
 
 VscodeDriver
   |
@@ -67,6 +73,7 @@ src/
 ├── operators/
 │   ├── actionResolver.ts
 │   ├── defaults.ts
+│   ├── evidenceCollector.ts
 │   ├── llmClient.ts
 │   ├── planParser.ts
 │   ├── stepVerifier.ts
@@ -81,12 +88,13 @@ src/
 | Component | Responsibility | Should not do |
 |-----------|----------------|---------------|
 | `PlanParser` | Parse YAML, resolve plan-relative setup paths, validate test plan shape | Execute actions or inspect VS Code UI |
-| `TestRunner` | Orchestrate launch, step execution, screenshots, verification, reporting, optional LLM analysis | Contain low-level Playwright selectors |
+| `TestRunner` | Orchestrate launch, step execution, screenshots, verification, reporting, and opt-in evidence/case analysis | Contain low-level Playwright selectors |
 | `ActionResolver` | Convert human-readable action strings into typed Driver calls | Implement UI automation directly |
 | `VscodeDriver` | Own VS Code lifecycle, workspace isolation, process cleanup, and shared Driver state | Parse YAML action syntax |
 | `drivers/operations/*` | Implement grouped Driver operation methods | Access private Driver fields directly |
 | `StepVerifier` | Execute deterministic verification fields and decide pass/fail | Use LLM output as pass/fail authority |
-| `LLMClient` | Analyze failed steps using screenshots and context | Execute test steps or mutate results |
+| `EvidenceCollector` | Build a bounded, redacted, framework-agnostic evidence bundle; host optional product-specific collectors | Decide pass/fail or infer root causes |
+| `LLMClient` | Verify screenshots, analyze a complete case, and summarize case analyses | Execute test steps or mutate the case verdict |
 
 ## Execution flow
 
@@ -97,10 +105,20 @@ For each step, `TestRunner` performs this sequence:
 3. Call `ActionResolver.resolve(step.action)`.
 4. Capture the after screenshot, or an error screenshot if execution fails.
 5. Call `StepVerifier.verify(step)`.
-6. If the step failed or errored and LLM configuration exists, call `LLMClient` for diagnostic analysis.
-7. Append a structured result to `results.json`.
+6. Optionally run the existing LLM screenshot re-check for a deterministic pass.
+7. In `case` or `evidence-only` mode, capture failure diagnostics and attempt metadata.
+8. Append a structured result to `results.json`.
 
-Deterministic verification is the only source of truth for pass/fail. The natural-language `verify` field is context for humans and LLM failure analysis.
+After all steps, the runner follows the selected analysis mode:
+
+- `legacy` (default): preserve the historical launch, verification, screenshots, report
+  shape, and exit behavior. The evidence probe is not loaded.
+- `case`: write the evidence bundle, then make one LLM call for a successful-case
+  false-pass audit or a failed-case root-cause analysis.
+- `evidence-only`: write the same bundle without LLM calls.
+
+Case-level analysis is advisory and never changes step status, case verdict, or exit code.
+LLM/API errors are recorded under the optional `analysis.error` field.
 
 ## Driver design
 
@@ -238,7 +256,7 @@ Verification design rules:
 - Prefer filesystem verification after language-server edits because VS Code can open duplicate tabs for the same file.
 - Poll when VS Code or a language server is expected to update asynchronously.
 - Return precise failure reasons that include expected and observed values.
-- Keep LLM analysis separate from pass/fail logic.
+- Keep case-level RCA and pass-audit output separate from pass/fail logic.
 
 ## Workspace and path model
 
@@ -264,13 +282,31 @@ Every run writes structured output:
 ```text
 test-results/<plan-name>/
 ├── results.json
-└── screenshots/
-    ├── 01_step-id_before.png
-    ├── 01_step-id_after.png
-    └── 02_step-id_error.png
+├── screenshots/
+│   ├── 01_step-id_before.png
+│   ├── 01_step-id_after.png
+│   └── 02_step-id_error.png
+├── evidence/
+│   ├── manifest.json
+│   ├── scenario.json
+│   ├── execution.json
+│   ├── environment.json
+│   ├── probe-final.json
+│   ├── diagnostics/
+│   └── logs/
+└── analysis/
+    └── case-analysis.json
 ```
 
-`run-all` also writes aggregate summaries. LLM analysis is optional and only runs after deterministic failure or action error.
+The `evidence/` and `analysis/` trees are opt-in; legacy output remains unchanged. The
+manifest uses forward-slash relative paths so artifacts are portable across runner
+platforms. Collectors redact common credentials and bound log payloads before persistence
+or LLM submission.
+
+`run-all --analysis-mode case` and `analyze --analysis-mode case` summarize the per-case
+analyses. Exact root-cause fingerprints are pre-grouped before the aggregate LLM call;
+older reports without `analysis.case` fall back to their complete failed-step reasons.
+`analyze --report-only` preserves report generation while suppressing a failure exit code.
 
 ## Extension points
 
@@ -294,6 +330,8 @@ CLI / SDK
     -> ActionResolver
       -> VscodeDriver
     -> StepVerifier
+      -> VscodeDriver
+    -> EvidenceCollector
       -> VscodeDriver
     -> LLMClient
 ```

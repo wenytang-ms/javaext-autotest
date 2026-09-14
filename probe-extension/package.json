@@ -1,0 +1,35 @@
+{
+  "name": "autotest-probe",
+  "displayName": "AutoTest Probe",
+  "description": "Test-only diagnostics bridge for vscode-autotest.",
+  "version": "0.0.1",
+  "publisher": "vscjava",
+  "private": true,
+  "engines": {
+    "vscode": "^1.77.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:autotest.dumpEvidence"
+  ],
+  "main": "./extension.cjs",
+  "contributes": {
+    "commands": [
+      {
+        "command": "autotest.dumpEvidence",
+        "title": "AutoTest: Dump Evidence"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "autotest.dumpEvidence",
+          "when": "false"
+        }
+      ]
+    }
+  }
+}

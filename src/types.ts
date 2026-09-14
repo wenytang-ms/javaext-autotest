@@ -242,8 +242,154 @@ export interface Diagnostic {
   severity: "error" | "warning" | "info" | "hint";
   message: string;
   source?: string;
+  code?: string | number | {
+    value: string | number;
+    target?: string;
+  };
+  uri?: string;
   file?: string;
   line?: number;
+  character?: number;
+  range?: {
+    start: { line: number; character: number };
+    end: { line: number; character: number };
+  };
+}
+
+export interface InstalledExtensionEvidence {
+  id: string;
+  version?: string;
+  isActive?: boolean;
+  extensionKind?: number;
+}
+
+export interface ProbeSnapshot {
+  schemaVersion: number;
+  capturedAt: string;
+  vscode: {
+    version: string;
+    appName: string;
+    appHost: string;
+    remoteName?: string;
+    uiKind: number;
+  };
+  process: {
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+    execPath: string;
+  };
+  workspaceFolders: string[];
+  activeEditor?: {
+    uri: string;
+    file?: string;
+    languageId: string;
+  };
+  diagnostics: Diagnostic[];
+  extensions: InstalledExtensionEvidence[];
+}
+
+export interface FailureEvidence {
+  capturedAt: string;
+  collectionErrors?: string[];
+  problemCounts?: {
+    errors: number;
+    warnings: number;
+  };
+  diagnostics: Diagnostic[];
+  visibleProblems?: Diagnostic[];
+  activeEditor?: ProbeSnapshot["activeEditor"];
+  signatures?: string[];
+}
+
+export interface EvidenceLog {
+  kind: string;
+  sourcePath: string;
+  artifactPath?: string;
+  sizeBytes: number;
+  tail: string;
+}
+
+export interface RunEvidence {
+  capturedAt: string;
+  collectionErrors?: string[];
+  environment: {
+    platform: string;
+    arch: string;
+    nodeVersion: string;
+    javaHome?: string;
+    javaVersion?: string;
+    autoTestVersion?: string;
+    githubRunId?: string;
+    githubJob?: string;
+    runnerOs?: string;
+    vscode?: ProbeSnapshot["vscode"];
+  };
+  installedExtensions: InstalledExtensionEvidence[];
+  bundledArtifacts: string[];
+  logs: EvidenceLog[];
+  signatures: string[];
+}
+
+export type AnalysisMode = "legacy" | "case" | "evidence-only";
+
+export interface EvidenceArtifact {
+  type: "scenario" | "execution" | "environment" | "probe" | "diagnostics" | "log" | "screenshot";
+  path: string;
+  label?: string;
+  stepId?: string;
+  phase?: "before" | "after" | "error" | "sub";
+  sizeBytes?: number;
+}
+
+export interface EvidenceBundleManifest {
+  schemaVersion: 1;
+  generatedAt: string;
+  planName: string;
+  declaredVerdict: "passed" | "failed" | "crashed";
+  artifacts: EvidenceArtifact[];
+  collectionErrors?: string[];
+}
+
+export interface AnalysisEvidenceCitation {
+  artifact: string;
+  location?: string;
+  observation: string;
+}
+
+export interface CaseRootCause {
+  fingerprint: string;
+  summary: string;
+  suspectedComponent: string;
+  directFailureSteps: string[];
+  cascadingFailureSteps: string[];
+  evidence: AnalysisEvidenceCitation[];
+  confidence: number;
+  recommendations: string[];
+}
+
+export interface CaseAnalysis {
+  schemaVersion: 1;
+  kind: "pass-audit" | "failure-root-cause";
+  assessment: "confirmed-pass" | "suspected-false-pass" | "confirmed-failure" | "inconclusive";
+  summary: string;
+  earliestDivergence: {
+    stepId?: string;
+    observation: string;
+  };
+  rootCauses: CaseRootCause[];
+  falsePassRisks: string[];
+  evidenceGaps: string[];
+  confidence: number;
+}
+
+export interface TestAnalysis {
+  schemaVersion: 1;
+  mode: Exclude<AnalysisMode, "legacy">;
+  evidenceManifest?: string;
+  caseAnalysisPath?: string;
+  case?: CaseAnalysis;
+  error?: string;
 }
 
 export interface VscodeDriverOptions {
@@ -273,6 +419,8 @@ export interface VscodeDriverOptions {
   workspaceTrust?: "trusted" | "untrusted" | "disabled";
   /** Mock showOpenDialog responses — each entry is consumed in order */
   mockOpenDialog?: string[][];
+  /** Load the bundled diagnostics probe used by opt-in evidence collection. */
+  enableEvidenceProbe?: boolean;
   /**
    * Max time (ms) to wait for `.monaco-workbench` to render after launch.
    * Defaults to {@link DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS}. Bump this for slow
@@ -284,6 +432,16 @@ export interface VscodeDriverOptions {
 
 // ─── Execution Result Types ────────────────────────────────
 
+export interface StepAttemptResult {
+  attempt: number;
+  status: "pass" | "fail" | "skip" | "error";
+  reason?: string;
+  duration: number;
+  screenshot?: string;
+  llmVerification?: VerificationResult;
+  evidence?: FailureEvidence;
+}
+
 export interface StepResult {
   stepId: string;
   action: string;
@@ -292,6 +450,9 @@ export interface StepResult {
   duration: number;
   snapshot?: A11yNode;
   screenshot?: string; // base64 or file path
+  attempts?: StepAttemptResult[];
+  llmVerification?: VerificationResult;
+  evidence?: FailureEvidence;
 }
 
 export interface TestReport {
@@ -310,6 +471,8 @@ export interface TestReport {
     skipped: number;
     errors: number;
   };
+  evidence?: RunEvidence;
+  analysis?: TestAnalysis;
   /** LLM-generated analysis of the overall test run (populated by aggregate analysis) */
   llmAnalysis?: string;
 }

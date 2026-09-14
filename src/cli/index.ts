@@ -7,11 +7,12 @@
  *   autotest validate <test-plan.yaml>   Validate test plan format
  */
 
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadTestPlan, validateTestPlanFile } from "../operators/planParser.js";
 import { TestRunner } from "../operators/testRunner.js";
+import type { AnalysisMode } from "../types.js";
 
 /**
  * Minimal .env loader (no external dependency).
@@ -135,6 +136,15 @@ function generateSummary(reports: Array<any>): {
 
 const program = new Command();
 
+function analysisModeOption(): Option {
+  return new Option(
+    "--analysis-mode <mode>",
+    "Analysis pipeline: legacy, case, or evidence-only",
+  )
+    .choices(["legacy", "case", "evidence-only"])
+    .default("legacy");
+}
+
 program
   .name("autotest")
   .description("AI-driven VSCode extension E2E testing framework")
@@ -147,10 +157,11 @@ program
   .option("--interactive", "Step-by-step execution with manual confirmation")
   .option("--output <dir>", "Output directory (default: ./test-results/<plan-name>)")
   .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
+  .addOption(analysisModeOption())
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install (overrides marketplace versions)")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields (e.g. --override extensionPath=../../vscode-java extension=redhat.java)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; analysisMode: AnalysisMode; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     try {
       const plan = loadTestPlan(planPath);
 
@@ -206,7 +217,11 @@ program
         ? path.resolve(opts.output)
         : path.resolve("test-results", planName);
 
-      const runner = new TestRunner(plan, { outputDir, noLLM: opts.llm === false });
+      const runner = new TestRunner(plan, {
+        outputDir,
+        noLLM: opts.llm === false,
+        analysisMode: opts.analysisMode,
+      });
 
       // Ensure VSCode is closed even if the process is interrupted (Ctrl+C)
       const cleanup = async () => {
@@ -233,11 +248,12 @@ program
   .description("Run all test plans in a directory and generate an aggregate summary")
   .option("--output <dir>", "Output directory (default: ./test-results)")
   .option("--no-llm", "Skip LLM analysis")
+  .addOption(analysisModeOption())
   .option("--exclude <plans>", "Comma-separated plan names to exclude", "java-fresh-import")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install for all plans")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields for all plans (e.g. --override extensionPath=../../vscode-java)")
-  .action(async (dir: string, opts: { output?: string; llm?: boolean; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (dir: string, opts: { output?: string; llm?: boolean; analysisMode: AnalysisMode; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     const { LLMClient } = await import("../operators/llmClient.js");
     const planFiles = fs.readdirSync(dir)
       .filter(f => f.endsWith(".yaml") || f.endsWith(".yml"))
@@ -297,7 +313,11 @@ program
         }
 
         const outputDir = path.join(outputBase, planName);
-        const runner = new TestRunner(plan, { outputDir, noLLM: opts.llm === false });
+        const runner = new TestRunner(plan, {
+          outputDir,
+          noLLM: opts.llm === false,
+          analysisMode: opts.analysisMode,
+        });
 
         const cleanup = async () => {
           await runner.cleanup();
@@ -336,7 +356,11 @@ program
     const { mdLines, failed: failedNames, failedPlans, crashedPlans } = generateSummary(reports);
 
     // LLM aggregate analysis
-    if (opts.llm !== false && (failedPlans + crashedPlans) > 0) {
+    if (
+      opts.llm !== false
+      && opts.analysisMode !== "evidence-only"
+      && ((failedPlans + crashedPlans) > 0 || opts.analysisMode === "case")
+    ) {
       const llm = new LLMClient();
       if (llm.isConfigured()) {
         console.log(`\n🤖 Generating LLM analysis...`);
@@ -350,7 +374,9 @@ program
             ?.filter((s: any) => s.status === "fail" || s.status === "error")
             .map((s: any) => ({ stepId: s.stepId, action: s.action, reason: s.reason })),
         }));
-        const analysis = await llm.summarizeResults(analysisInput);
+        const analysis = opts.analysisMode === "case"
+          ? await llm.summarizeCaseResults(reports)
+          : await llm.summarizeResults(analysisInput);
         console.log(`\n📝 LLM Analysis:\n${analysis}`);
         mdLines.push(``);
         mdLines.push(`### 🤖 AI Analysis`);
@@ -375,7 +401,9 @@ program
   .description("Analyze existing test results and generate aggregate summary with LLM")
   .option("--output <dir>", "Output directory for summary (default: same as input dir)")
   .option("--no-llm", "Skip LLM analysis")
-  .action(async (dir: string, opts: { output?: string; llm?: boolean }) => {
+  .option("--report-only", "Write the summary without failing the command for failed cases")
+  .addOption(analysisModeOption())
+  .action(async (dir: string, opts: { output?: string; llm?: boolean; reportOnly?: boolean; analysisMode: AnalysisMode }) => {
     const { LLMClient } = await import("../operators/llmClient.js");
     const resolvedDir = path.resolve(dir);
     const outputBase = opts.output ? path.resolve(opts.output) : resolvedDir;
@@ -401,7 +429,11 @@ program
     const { mdLines, failed, passedPlans, failedPlans, crashedPlans } = generateSummary(reports);
 
     // LLM aggregate analysis
-    if (opts.llm !== false && (failedPlans + crashedPlans) > 0) {
+    if (
+      opts.llm !== false
+      && opts.analysisMode !== "evidence-only"
+      && ((failedPlans + crashedPlans) > 0 || opts.analysisMode === "case")
+    ) {
       const llm = new LLMClient();
       if (llm.isConfigured()) {
         console.log(`\n🤖 Generating LLM analysis...`);
@@ -415,7 +447,9 @@ program
             ?.filter((s: any) => s.status === "fail" || s.status === "error")
             .map((s: any) => ({ stepId: s.stepId, action: s.action, reason: s.reason })),
         }));
-        const analysis = await llm.summarizeResults(analysisInput);
+        const analysis = opts.analysisMode === "case"
+          ? await llm.summarizeCaseResults(reports)
+          : await llm.summarizeResults(analysisInput);
         console.log(`\n📝 LLM Analysis:\n${analysis}`);
         mdLines.push(``);
         mdLines.push(`### 🤖 AI Analysis`);
@@ -430,7 +464,7 @@ program
     fs.writeFileSync(mdPath, mdLines.join("\n"));
     console.log(`📄 Summary → ${mdPath}`);
 
-    process.exit(failed.length > 0 ? 1 : 0);
+    process.exit(!opts.reportOnly && failed.length > 0 ? 1 : 0);
   });
 
 program
