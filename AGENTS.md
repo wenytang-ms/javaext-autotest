@@ -17,7 +17,13 @@ npx autotest run test-plans/plan.yaml --vsix path/to/extension.vsix
 npx autotest run-all test-plans --exclude java-fresh-import
 
 # Run all with VSIX and LLM analysis
-npx autotest run-all test-plans --vsix path/to/ext.vsix --output test-results
+npx autotest run-all test-plans --vsix path/to/ext.vsix --output test-results --analysis-mode case
+
+# Capture evidence without an LLM
+npx autotest run test-plans/plan.yaml --analysis-mode evidence-only
+
+# Re-summarize a matrix without failing the workflow step
+npx autotest analyze test-results --analysis-mode case --report-only
 
 # Validate test plan format
 npx autotest validate test-plans/<plan>.yaml
@@ -28,13 +34,18 @@ npx autotest validate test-plans/<plan>.yaml
 ```
 YAML Test Plan → PlanParser → TestRunner → ActionResolver → VscodeDriver (Playwright)
                                          → StepVerifier (deterministic checks)
-                                         → LLMClient (post-failure analysis)
+                                         → EvidenceCollector + bundled probe (opt-in)
+                                         → LLMClient (step, case, and matrix analysis)
 ```
 
 - **VscodeDriver** — Playwright Electron wrapper, launches VSCode via `@vscode/test-electron`
 - **ActionResolver** — Maps natural language actions to Driver methods via regex patterns
 - **StepVerifier** — Deterministic verification (file, editor, problems, completion, notification, tree item, editor tab, dialog, output channel, terminal)
-- **LLMClient** — Azure OpenAI for post-failure screenshot analysis (optional)
+- **EvidenceCollector** — Opt-in generic bundle of scenario, execution, screenshots,
+  diagnostics, runtime metadata, and bounded/redacted logs. Java-specific evidence adapters
+  may add JDT LS logs and bundled JDT/Lombok versions.
+- **LLMClient** — Azure OpenAI for existing step screenshot checks, case-level pass
+  audits/failure RCA, and matrix-level root-cause clustering.
 
 ## Test Plan YAML Structure
 
@@ -374,6 +385,7 @@ Quote arguments that contain spaces. Both the view name and the action label are
 | `--override <kv...>` | Override setup fields (e.g. `--override extensionPath=../../vscode-java`) |
 | `--output <dir>` | Output directory (default: `./test-results/<plan-name>`) |
 | `--no-llm` | Skip LLM verification |
+| `--analysis-mode <mode>` | `legacy` (default), `case`, or `evidence-only` |
 
 ### `autotest run-all <dir>`
 | Option | Description |
@@ -383,17 +395,34 @@ Quote arguments that contain spaces. Both the view name and the action label are
 | `--override <kv...>` | Override setup fields for all plans |
 | `--output <dir>` | Output directory (default: `./test-results`) |
 | `--no-llm` | Skip LLM analysis |
+| `--analysis-mode <mode>` | `legacy` (default), `case`, or `evidence-only` |
 | `--exclude <plans>` | Comma-separated plan names to exclude |
+
+### `autotest analyze <dir>`
+| Option | Description |
+|--------|-------------|
+| `--analysis-mode <mode>` | Use case analyses for matrix aggregation when set to `case` |
+| `--report-only` | Write `summary.md` and exit 0 even when cases failed |
+| `--no-llm` | Skip aggregate LLM analysis |
 
 ## Test Output
 
 ```
 test-results/<plan-name>/
 ├── results.json          # Full report with step results
-└── screenshots/
-    ├── 01_step-id_before.png
-    ├── 02_step-id_after.png    # or _error.png on failure
-    └── ...
+├── screenshots/
+│   ├── 01_step-id_before.png
+│   ├── 02_step-id_after.png    # or _error.png on failure
+│   └── ...
+├── evidence/             # case/evidence-only modes
+│   ├── manifest.json
+│   ├── scenario.json
+│   ├── execution.json
+│   ├── environment.json
+│   ├── diagnostics/
+│   └── logs/
+└── analysis/             # case mode when LLM analysis succeeds
+    └── case-analysis.json
 
 test-results/
 └── summary.md            # Aggregate results table and optional LLM analysis
@@ -408,8 +437,11 @@ AZURE_OPENAI_DEPLOYMENT=gpt-4.1
 AZURE_OPENAI_API_VERSION=2024-12-01-preview
 ```
 
-- LLM analyzes failed steps (before/after screenshot comparison) and generates aggregate summary
-- Not configured → all LLM features silently skipped
+- `legacy` is the default and does not load the probe or change the historical report shape.
+- `case` analyzes every case: successful cases for false-pass risk and failed cases for
+  evidence-based root cause. It does not change the case verdict.
+- `evidence-only` captures the bundle without LLM calls.
+- Missing LLM configuration is recorded in `analysis.error`; evidence remains usable.
 
 ## Environment Requirements
 

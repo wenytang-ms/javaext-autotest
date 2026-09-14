@@ -29,8 +29,14 @@ npx autotest run test-plans/java-maven.yaml --output test-results/java-maven
 # Run all plans and generate an aggregate summary
 npx autotest run-all test-plans --exclude java-fresh-import
 
+# Opt in to per-case pass audits / failure RCA and matrix-level clustering
+npx autotest run-all test-plans --analysis-mode case
+
+# Capture a reusable evidence bundle without calling an LLM
+npx autotest run test-plans/java-maven.yaml --analysis-mode evidence-only
+
 # Re-analyze existing test results
-npx autotest analyze test-results
+npx autotest analyze test-results --analysis-mode case --report-only
 ```
 
 ### Requirements
@@ -52,7 +58,7 @@ npx autotest analyze test-results
                    ▼
 ┌─────────────────────────────────────────────────────┐
 │              TestRunner (orchestrator)               │
-│  Launch VS Code → execute steps → screenshots → report│
+│  Launch VS Code → execute steps → evidence → report   │
 │                                                     │
 │  ┌──────────────────┐  ┌─────────────────────────┐  │
 │  │  ActionResolver   │  │     StepVerifier        │  │
@@ -63,7 +69,11 @@ npx autotest analyze test-results
 │           │              ┌────────┴────────┐         │
 │           │              │    LLMClient    │         │
 │           │              │  Azure OpenAI   │         │
-│           │              │ failure analysis│         │
+│           │              │case + matrix AI │         │
+│           │              └─────────────────┘         │
+│           │              ┌─────────────────┐         │
+│           │              │EvidenceCollector│         │
+│           │              │ evidence bundle │         │
 │           │              └─────────────────┘         │
 └───────────┼──────────────────────────────────────────┘
             ▼
@@ -132,7 +142,7 @@ ActionResolver uses a deterministic regex dictionary. Unmatched actions are exec
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `verify` | string | Natural-language expected outcome; currently used as context for LLM failure analysis and does not decide pass/fail by itself |
+| `verify` | string | Natural-language expected outcome used by the existing screenshot re-check and case analysis |
 | `verifyFile` | object | File existence/content checks with `path`, `exists`, and `contains` |
 | `verifyNotification` | string | Notification text match |
 | `verifyEditor` | object | Editor content match, commonly `contains` |
@@ -163,6 +173,14 @@ Every step captures screenshots under the output directory's `screenshots/` subd
 | pass | `NN_<stepId>_before.png` + `NN_<stepId>_after.png` |
 | fail / error | `NN_<stepId>_before.png` + `NN_<stepId>_after.png` or `NN_<stepId>_error.png` |
 
+The default `legacy` mode keeps the existing report and screenshot behavior unchanged.
+`--analysis-mode case` and `--analysis-mode evidence-only` additionally produce a generic
+evidence bundle under `evidence/`. A bundled test-only probe reads diagnostics through
+`vscode.languages.getDiagnostics()` and records extension/runtime metadata. The Node
+collector adds bounded, secret-redacted logs and component metadata; Java runs currently
+include an optional adapter for JDT LS logs and bundled JDT/Lombok artifacts. The probe is
+loaded only for these opt-in modes and is not part of the extension under test.
+
 ### Process management
 
 - The VS Code user-data directory is cleared before each launch to avoid restoring old windows.
@@ -171,9 +189,27 @@ Every step captures screenshots under the output directory's `screenshots/` subd
 
 ---
 
-## LLM failure analysis (optional)
+## Analysis modes (optional)
 
-LLM support is an optional failure-analysis layer. When a deterministic check fails or a step errors, the framework sends before/after screenshots, the action, and the `verify` description to Azure OpenAI to generate reasoning and repair suggestions. `verify` does not replace deterministic checks and does not decide step pass/fail by itself.
+Evidence-backed case analysis is opt-in so existing plans, reports, verdicts, and exit codes remain compatible:
+
+| Mode | Behavior |
+|------|----------|
+| `legacy` | Default. Keeps the existing step screenshot verification and report shape; does not load the probe or write an evidence bundle. |
+| `case` | Keeps step verification, writes the evidence bundle, then performs one case-level pass audit or failure RCA. The case analysis is advisory and never changes the runner verdict. |
+| `evidence-only` | Writes the same evidence bundle without any LLM calls. |
+
+Case analysis follows one framework-agnostic pattern: reconstruct the complete scenario and
+attempt history, identify the earliest divergence, cite logs/diagnostics/screenshots, split
+direct failures from cascading failures, record evidence gaps, and recommend a confirming
+experiment. Passing cases are audited for no-op actions, stale state, weak assertions,
+hidden errors, and other false-pass risks. Results are stored under the optional top-level
+`analysis` field and, when successful, in `analysis/case-analysis.json`.
+
+`run-all --analysis-mode case` and `analyze --analysis-mode case` aggregate those case
+analyses and cluster matching root-cause fingerprints across plans and platforms. Reports
+created by older AutoTest versions remain readable; cases without the new `analysis` field
+fall back to their full failed-step reasons.
 
 ```yaml
 - id: "check-ls"
@@ -192,8 +228,9 @@ export AZURE_OPENAI_DEPLOYMENT=gpt-4.1       # Optional, default: gpt-4.1
 export AZURE_OPENAI_API_VERSION=2024-12-01-preview
 ```
 
-- If not configured, LLM analysis is skipped and deterministic checks are unaffected.
-- `--no-llm` forces LLM analysis off.
+- If Azure OpenAI is not configured, `case` mode still writes evidence and records
+  `analysis.error`; the runner verdict is unchanged.
+- `--no-llm` disables LLM calls. In `case` mode, evidence collection still runs.
 
 ---
 
@@ -245,7 +282,9 @@ Common options:
 | Option | Commands | Description |
 |--------|----------|-------------|
 | `--output <dir>` | `run` / `run-all` / `analyze` | Set the output directory |
-| `--no-llm` | `run` / `run-all` / `analyze` | Skip LLM failure analysis |
+| `--analysis-mode <mode>` | `run` / `run-all` / `analyze` | Select `legacy` (default), `case`, or `evidence-only` |
+| `--no-llm` | `run` / `run-all` / `analyze` | Skip LLM calls; opt-in evidence collection remains enabled |
+| `--report-only` | `analyze` | Write the summary and exit 0 even when cases failed |
 | `--vsix <paths>` | `run` / `run-all` | Comma-separated VSIX paths appended to `setup.vsix` |
 | `--override <kv...>` | `run` / `run-all` | Override `setup` fields, for example `--override extensionPath=../../vscode-java` |
 | `--exclude <plans>` | `run-all` | Comma-separated plan names; defaults to excluding `java-fresh-import` |
@@ -331,9 +370,10 @@ autotest/
 │   ├── operators/
 │   │   ├── actionResolver.ts   # Action → Driver calls (50+ regex)
 │   │   ├── defaults.ts         # Shared timeout / poll-interval constants
+│   │   ├── evidenceCollector.ts # Diagnostics, runtime metadata, and log evidence
 │   │   ├── stepVerifier.ts     # Deterministic verification (10+ strategies)
 │   │   ├── verifierUtils.ts    # pollUntil + verify result helpers
-│   │   ├── llmClient.ts        # Azure OpenAI client (failure screenshot analysis)
+│   │   ├── llmClient.ts        # Azure OpenAI client (evidence-based root-cause analysis)
 │   │   ├── planParser.ts       # YAML test plan parser (paths relative to plan file)
 │   │   └── testRunner.ts       # Orchestrator (launch → execute → screenshot → report)
 │   ├── cli/
@@ -344,7 +384,9 @@ autotest/
 ├── test-results/                # Test output (one subdirectory per plan)
 │   └── <plan-name>/
 │       ├── results.json
+│       ├── diagnostics/
 │       └── screenshots/
+├── probe-extension/             # Bundled test-only VS Code diagnostics bridge
 ├── AGENTS.md                    # Copilot CLI integration guide
 ├── CONTRIBUTING.md              # Contributor workflow and design rules
 ├── docs/

@@ -13,7 +13,7 @@ import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { VscodeDriverOptions } from "../types.js";
 import { commandOperations, type CommandOperations } from "./operations/commandOperations.js";
 import { clipboardOperations, type ClipboardOperations } from "./operations/clipboardOperations.js";
@@ -31,6 +31,12 @@ import { treeOperations, type TreeOperations } from "./operations/treeOperations
 import { verificationOperations, type VerificationOperations } from "./operations/verificationOperations.js";
 
 const WORKBENCH_SELECTOR = ".monaco-workbench";
+const AUTOTEST_PROBE_COMMAND = "autotest.dumpEvidence";
+
+function getBundledProbeExtensionPath(): string | null {
+  const probePath = fileURLToPath(new URL("../../probe-extension", import.meta.url));
+  return fs.existsSync(path.join(probePath, "package.json")) ? probePath : null;
+}
 
 /**
  * Default deadline for `.monaco-workbench` to render after VSCode launch.
@@ -103,6 +109,10 @@ export class VscodeDriver {
   private worktreeRoot: string | null = null;
   /** User data dir actually used by the launched VS Code (for keybindings.json writes) */
   private actualUserDataDir: string | null = null;
+  /** Extensions dir actually used by the launched VS Code. */
+  private actualExtensionsDir: string | null = null;
+  /** Continuously refreshed evidence snapshot written by the bundled probe extension. */
+  private probeSnapshotPath: string | null = null;
   /** Lazy mapping of (commandId+args) → keybinding key for executeVSCodeCommand */
   private keybindingsByCommand: KeybindingEntry[] = [];
 
@@ -127,6 +137,8 @@ export class VscodeDriver {
     // Reset per-launch keybinding state — each VS Code session gets a fresh pool.
     this.keybindingsByCommand = [];
     this.actualUserDataDir = null;
+    this.actualExtensionsDir = null;
+    this.probeSnapshotPath = null;
 
     const version = this.options.vscodeVersion ?? "insiders";
     const vscodePath = await downloadAndUnzipVSCode(version);
@@ -134,9 +146,14 @@ export class VscodeDriver {
 
     const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(this.getTemporaryDirectory(), "autotest-"));
     const extensionsDir = baseArgs.find(a => a.startsWith("--extensions-dir="))?.split("=")[1];
+    this.actualExtensionsDir = extensionsDir ?? null;
+    const bundledProbePath = this.options.enableEvidenceProbe
+      ? getBundledProbeExtensionPath()
+      : null;
     const extensionDevelopmentPaths = [
       ...(this.options.extensionPath ? [this.options.extensionPath] : []),
       ...(this.options.extensionPaths ?? []),
+      ...(bundledProbePath ? [bundledProbePath] : []),
     ];
 
     if (extensionsDir) {
@@ -145,12 +162,13 @@ export class VscodeDriver {
       }
     }
 
-    if (this.options.localExtensions?.length) {
+    const localExtensions = this.options.localExtensions ?? [];
+    if (localExtensions.length > 0) {
       if (!extensionsDir) {
         throw new Error("Unable to resolve VS Code extensions directory for local extension installation.");
       }
       fs.mkdirSync(extensionsDir, { recursive: true });
-      for (const extensionPath of this.options.localExtensions) {
+      for (const extensionPath of localExtensions) {
         const packageJsonPath = path.join(extensionPath, "package.json");
         const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8"));
         const publisher = packageJson.publisher ?? "local";
@@ -294,6 +312,9 @@ export class VscodeDriver {
 
     // Inject settings.json into the ACTUAL user data dir that VSCode will use (from baseArgs)
     const actualUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1] ?? userDataDir;
+    this.probeSnapshotPath = this.options.enableEvidenceProbe
+      ? path.join(actualUserDataDir, "User", "autotest-probe.json")
+      : null;
     const settingsPath = path.join(actualUserDataDir, "User", "settings.json");
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     // Always disable window restoration for test isolation
@@ -335,7 +356,11 @@ export class VscodeDriver {
 
     this.app = await _electron.launch({
       executablePath: vscodePath,
-      env: { ...process.env, NODE_ENV: "development" },
+      env: {
+        ...process.env,
+        NODE_ENV: "development",
+        ...(this.probeSnapshotPath ? { AUTOTEST_PROBE_OUTPUT: this.probeSnapshotPath } : {}),
+      },
       args,
     });
 
@@ -532,6 +557,39 @@ export class VscodeDriver {
    */
   getElectronApp(): ElectronApplication | null {
     return this.app;
+  }
+
+  getUserDataDir(): string | null {
+    return this.actualUserDataDir;
+  }
+
+  getExtensionsDir(): string | null {
+    return this.actualExtensionsDir;
+  }
+
+  getProbeSnapshotPath(): string | null {
+    return this.probeSnapshotPath;
+  }
+
+  async refreshProbeSnapshot(): Promise<void> {
+    if (!this.probeSnapshotPath || !this.page) return;
+
+    const previousMtime = fs.existsSync(this.probeSnapshotPath)
+      ? fs.statSync(this.probeSnapshotPath).mtimeMs
+      : 0;
+    await this.executeVSCodeCommand(AUTOTEST_PROBE_COMMAND, this.probeSnapshotPath);
+
+    const deadline = Date.now() + 3_000;
+    while (Date.now() < deadline) {
+      if (
+        fs.existsSync(this.probeSnapshotPath)
+        && fs.statSync(this.probeSnapshotPath).mtimeMs > previousMtime
+      ) {
+        return;
+      }
+      await this.page.waitForTimeout(100);
+    }
+    throw new Error(`AutoTest probe did not refresh ${this.probeSnapshotPath}`);
   }
 
   resolveWorkspacePlaceholders(value: unknown): unknown {
