@@ -1,8 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LLMClient } from "../src/operators/llmClient.js";
 import type { CaseAnalysis, TestPlan, TestReport } from "../src/types.js";
 
+beforeEach(() => {
+  vi.stubEnv("AUTOTEST_CASE_ANALYSIS_MAX_TOKENS", undefined);
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -183,6 +188,7 @@ describe("LLMClient case and matrix analysis", () => {
     })).resolves.toEqual(expected);
 
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(request.max_completion_tokens).toBe(4_000);
     expect(request.response_format.json_schema.name).toBe("case_analysis");
     const prompt = request.messages[1].content[0].text;
     expect(prompt).toContain("complete E2E scenario");
@@ -201,7 +207,16 @@ describe("LLMClient case and matrix analysis", () => {
     );
   });
 
-  it("audits successful cases for false-pass risk", async () => {
+  it.each([
+    { source: "default", env: undefined, sdk: undefined, tokens: 4_000 },
+    { source: "environment", env: "6000", sdk: undefined, tokens: 6_000 },
+    { source: "padded environment", env: " 5000 ", sdk: undefined, tokens: 5_000 },
+    { source: "minimum positive value", env: "1", sdk: undefined, tokens: 1 },
+    { source: "SDK", env: undefined, sdk: 7_000, tokens: 7_000 },
+    { source: "SDK over environment", env: "6000", sdk: 7_000, tokens: 7_000 },
+    { source: "SDK over invalid environment", env: "invalid", sdk: 5_000, tokens: 5_000 },
+  ])("audits successful cases with the $source token budget", async ({ env, sdk, tokens }) => {
+    vi.stubEnv("AUTOTEST_CASE_ANALYSIS_MAX_TOKENS", env);
     const expected: CaseAnalysis = {
       schemaVersion: 1,
       kind: "pass-audit",
@@ -236,6 +251,7 @@ describe("LLMClient case and matrix analysis", () => {
     const client = new LLMClient({
       endpoint: "https://example.openai.azure.com",
       apiKey: "test-key",
+      caseAnalysisMaxTokens: sdk,
     });
 
     await expect(client.analyzeCase({
@@ -244,8 +260,80 @@ describe("LLMClient case and matrix analysis", () => {
     })).resolves.toEqual(expected);
 
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(request.max_completion_tokens).toBe(tokens);
     expect(request.messages[0].content).toContain("For a passing case");
     expect(request.messages[1].content[0].text).toContain('"passed": 2');
+  });
+
+  it.each([
+    "", " ", "0", "-1", "1.5", "4k", "4000tokens", "NaN", "Infinity",
+    "0x1000", "1e3", "9007199254740992",
+  ])("rejects invalid environment token budget %j before requesting analysis", async (value) => {
+    vi.stubEnv("AUTOTEST_CASE_ANALYSIS_MAX_TOKENS", value);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new LLMClient({
+      endpoint: "https://example.openai.azure.com",
+      apiKey: "test-key",
+    });
+
+    await expect(client.analyzeCase({
+      plan,
+      report: report(),
+    })).rejects.toThrow(
+      "Case analysis token limit must be a positive safe integer. "
+      + "Check LLMClientOptions.caseAnalysisMaxTokens or AUTOTEST_CASE_ANALYSIS_MAX_TOKENS.",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1,
+  ])("rejects invalid SDK token budget %s without falling back to the environment", async (value) => {
+    vi.stubEnv("AUTOTEST_CASE_ANALYSIS_MAX_TOKENS", "6000");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new LLMClient({
+      endpoint: "https://example.openai.azure.com",
+      apiKey: "test-key",
+      caseAnalysisMaxTokens: value,
+    });
+
+    await expect(client.analyzeCase({
+      plan,
+      report: report(),
+    })).rejects.toThrow("Case analysis token limit must be a positive safe integer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not apply or validate the case budget for step verification and summaries", async () => {
+    vi.stubEnv("AUTOTEST_CASE_ANALYSIS_MAX_TOKENS", "invalid");
+    const verification = { passed: true, reasoning: "Expected state is visible.", confidence: 0.9 };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [{ finish_reason: "stop", message: { content: "Summary" } }],
+      }),
+    }).mockResolvedValueOnce({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        choices: [{ message: { content: JSON.stringify(verification) } }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new LLMClient({
+      endpoint: "https://example.openai.azure.com",
+      apiKey: "test-key",
+      caseAnalysisMaxTokens: 0,
+    });
+
+    await expect(client.verifyStep("before", "after", "wait", "Expected state is visible"))
+      .resolves.toEqual(verification);
+    await expect(client.summarizeResults([])).resolves.toBe("Summary");
+    await expect(client.summarizeCaseResults([])).resolves.toBe("Summary");
+    expect(fetchMock.mock.calls.map((call) =>
+      JSON.parse(String(call[1]?.body)).max_completion_tokens
+    )).toEqual([800, 600, 1_200]);
   });
 
   it("surfaces truncated structured responses instead of parsing incomplete JSON", async () => {
