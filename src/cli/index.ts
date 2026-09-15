@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { loadTestPlan, validateTestPlanFile } from "../operators/planParser.js";
 import { TestRunner } from "../operators/testRunner.js";
 import type { AnalysisMode } from "../types.js";
+import { generateSummary } from "./summary.js";
 
 /**
  * Minimal .env loader (no external dependency).
@@ -69,70 +70,6 @@ loadDotEnv(path.resolve(process.cwd(), ".env"));
 const packageMetadata = JSON.parse(
   fs.readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ) as { version: string };
-
-/** Generate markdown summary from test reports */
-function generateSummary(reports: Array<any>): {
-  mdLines: string[];
-  failed: string[];
-  passedPlans: number;
-  failedPlans: number;
-  crashedPlans: number;
-} {
-  const totalPlans = reports.length;
-  const passedPlans = reports.filter((r: any) => !r.crashed && r.summary.failed + r.summary.errors === 0).length;
-  const crashedPlans = reports.filter((r: any) => r.crashed).length;
-  const failedPlans = totalPlans - passedPlans - crashedPlans;
-  const failed: string[] = [];
-
-  const mdLines: string[] = [];
-  mdLines.push(`## E2E Test Results`);
-  mdLines.push(``);
-  mdLines.push(`| Status | Test Plan | Steps | Duration |`);
-  mdLines.push(`|--------|-----------|-------|----------|`);
-
-  for (const r of reports) {
-    const icon = r.crashed ? "💥" : r.summary.failed + r.summary.errors > 0 ? "❌" : "✅";
-    const status = r.crashed ? "CRASH" : `${r.summary.passed}/${r.summary.total}`;
-    const dur = `${(r.duration / 1000).toFixed(1)}s`;
-    mdLines.push(`| ${icon} | ${r.planName} | ${status} | ${dur} |`);
-    console.log(`  ${icon} ${r.planName}: ${status}`);
-    if (r.crashed || r.summary.failed + r.summary.errors > 0) {
-      failed.push(r.planName);
-    }
-  }
-
-  mdLines.push(``);
-  mdLines.push(`**Total: ${totalPlans}** — ✅ ${passedPlans} passed · ❌ ${failedPlans} failed · 💥 ${crashedPlans} crashed`);
-  console.log(`\n  Total: ${totalPlans} | ✅ ${passedPlans} | ❌ ${failedPlans} | 💥 ${crashedPlans}`);
-
-  // Failed step details
-  const allFailedSteps = reports.flatMap((r: any) =>
-    (r.results ?? [])
-      .filter((s: any) => s.status === "fail" || s.status === "error")
-      .map((s: any) => ({ plan: r.planName, ...s }))
-  );
-  if (allFailedSteps.length > 0) {
-    mdLines.push(``);
-    mdLines.push(`### Failed Steps`);
-    mdLines.push(``);
-    for (const s of allFailedSteps) {
-      mdLines.push(`- **${s.plan}** → \`${s.stepId}\`: ${s.reason?.substring(0, 150) ?? "unknown"}`);
-    }
-  }
-
-  // Crash details
-  const crashedReports = reports.filter((r: any) => r.crashed);
-  if (crashedReports.length > 0) {
-    mdLines.push(``);
-    mdLines.push(`### Crashes`);
-    mdLines.push(``);
-    for (const r of crashedReports) {
-      mdLines.push(`- **${r.planName}**: ${r.crashReason ?? "VSCode exited before any steps could execute"}`);
-    }
-  }
-
-  return { mdLines, failed, passedPlans, failedPlans, crashedPlans };
-}
 
 const program = new Command();
 
@@ -254,7 +191,6 @@ program
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields for all plans (e.g. --override extensionPath=../../vscode-java)")
   .action(async (dir: string, opts: { output?: string; llm?: boolean; analysisMode: AnalysisMode; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
-    const { LLMClient } = await import("../operators/llmClient.js");
     const planFiles = fs.readdirSync(dir)
       .filter(f => f.endsWith(".yaml") || f.endsWith(".yml"))
       .sort();
@@ -353,37 +289,7 @@ program
     console.log("  AGGREGATE SUMMARY");
     console.log(`${"=".repeat(60)}`);
 
-    const { mdLines, failed: failedNames, failedPlans, crashedPlans } = generateSummary(reports);
-
-    // LLM aggregate analysis
-    if (
-      opts.llm !== false
-      && opts.analysisMode !== "evidence-only"
-      && ((failedPlans + crashedPlans) > 0 || opts.analysisMode === "case")
-    ) {
-      const llm = new LLMClient();
-      if (llm.isConfigured()) {
-        console.log(`\n🤖 Generating LLM analysis...`);
-        const analysisInput = reports.map((r: any) => ({
-          planName: r.planName,
-          duration: r.duration,
-          crashed: r.crashed,
-          crashReason: r.crashReason,
-          summary: r.summary,
-          failedSteps: r.results
-            ?.filter((s: any) => s.status === "fail" || s.status === "error")
-            .map((s: any) => ({ stepId: s.stepId, action: s.action, reason: s.reason })),
-        }));
-        const analysis = opts.analysisMode === "case"
-          ? await llm.summarizeCaseResults(reports)
-          : await llm.summarizeResults(analysisInput);
-        console.log(`\n📝 LLM Analysis:\n${analysis}`);
-        mdLines.push(``);
-        mdLines.push(`### 🤖 AI Analysis`);
-        mdLines.push(``);
-        mdLines.push(analysis);
-      }
-    }
+    const { mdLines, failed: failedNames } = await generateSummary(reports, opts);
 
     // Save summary.md
     if (outputBase) {
@@ -404,7 +310,6 @@ program
   .option("--report-only", "Write the summary without failing the command for failed cases")
   .addOption(analysisModeOption())
   .action(async (dir: string, opts: { output?: string; llm?: boolean; reportOnly?: boolean; analysisMode: AnalysisMode }) => {
-    const { LLMClient } = await import("../operators/llmClient.js");
     const resolvedDir = path.resolve(dir);
     const outputBase = opts.output ? path.resolve(opts.output) : resolvedDir;
 
@@ -426,37 +331,7 @@ program
 
     console.log(`📋 Found ${reports.length} test result(s)\n`);
 
-    const { mdLines, failed, passedPlans, failedPlans, crashedPlans } = generateSummary(reports);
-
-    // LLM aggregate analysis
-    if (
-      opts.llm !== false
-      && opts.analysisMode !== "evidence-only"
-      && ((failedPlans + crashedPlans) > 0 || opts.analysisMode === "case")
-    ) {
-      const llm = new LLMClient();
-      if (llm.isConfigured()) {
-        console.log(`\n🤖 Generating LLM analysis...`);
-        const analysisInput = reports.map((r: any) => ({
-          planName: r.planName,
-          duration: r.duration,
-          crashed: r.crashed,
-          crashReason: r.crashReason,
-          summary: r.summary,
-          failedSteps: r.results
-            ?.filter((s: any) => s.status === "fail" || s.status === "error")
-            .map((s: any) => ({ stepId: s.stepId, action: s.action, reason: s.reason })),
-        }));
-        const analysis = opts.analysisMode === "case"
-          ? await llm.summarizeCaseResults(reports)
-          : await llm.summarizeResults(analysisInput);
-        console.log(`\n📝 LLM Analysis:\n${analysis}`);
-        mdLines.push(``);
-        mdLines.push(`### 🤖 AI Analysis`);
-        mdLines.push(``);
-        mdLines.push(analysis);
-      }
-    }
+    const { mdLines, failed } = await generateSummary(reports, opts);
 
     // Save summary.md
     fs.mkdirSync(outputBase, { recursive: true });

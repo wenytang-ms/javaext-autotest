@@ -11,6 +11,7 @@
  */
 
 import type {
+  AggregateAnalysis,
   CaseAnalysis,
   EvidenceBundleManifest,
   FailureEvidence,
@@ -142,6 +143,20 @@ const CASE_ANALYSIS_SCHEMA = {
       "evidenceGaps",
       "confidence",
     ],
+  },
+};
+
+const AGGREGATE_ANALYSIS_SCHEMA = {
+  name: "aggregate_analysis",
+  strict: true,
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      tldr: { type: "string" },
+      details: { type: "string" },
+    },
+    required: ["tldr", "details"],
   },
 };
 
@@ -539,11 +554,7 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
     return data.choices?.[0]?.message?.content ?? "No analysis generated";
   }
 
-  async summarizeCaseResults(reports: TestReport[]): Promise<string> {
-    if (!this.isConfigured()) {
-      return "LLM not configured — skipping aggregate analysis";
-    }
-
+  private buildCaseSummaryPrompt(reports: TestReport[]): string {
     const clusters = new Map<string, {
       cases: Set<string>;
       summaries: Set<string>;
@@ -601,7 +612,7 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
       evidenceExamples: [...cluster.evidence].slice(0, 10),
     }));
 
-    const prompt = `Summarize the analyses from an E2E test matrix.
+    return `Summarize the analyses from an E2E test matrix.
 Treat each case analysis as a diagnosis backed by its own evidence. Merge root
 causes only when their fingerprints or supporting evidence indicate the same
 underlying issue. Highlight suspected false passes, cross-platform patterns,
@@ -622,6 +633,12 @@ Provide:
 6. Up to three recommended next actions
 
 Keep the summary under 500 words.`;
+  }
+
+  async summarizeCaseResults(reports: TestReport[]): Promise<string> {
+    if (!this.isConfigured()) {
+      return "LLM not configured — skipping aggregate analysis";
+    }
 
     try {
       const { content } = await this.requestCompletion({
@@ -630,7 +647,7 @@ Keep the summary under 500 words.`;
             role: "system",
             content: "You summarize evidence-backed case analyses without inventing new root causes.",
           },
-          { role: "user", content: prompt },
+          { role: "user", content: this.buildCaseSummaryPrompt(reports) },
         ],
         max_completion_tokens: 1_200,
       });
@@ -638,6 +655,50 @@ Keep the summary under 500 words.`;
     } catch (e) {
       return `LLM analysis failed: ${(e as Error).message}`;
     }
+  }
+
+  async summarizeCaseResultsStructured(reports: TestReport[]): Promise<AggregateAnalysis> {
+    if (!this.isConfigured()) {
+      throw new Error("LLM not configured");
+    }
+
+    const { content } = await this.requestCompletion({
+      messages: [
+        {
+          role: "system",
+          content: "You summarize evidence-backed case analyses without inventing new root causes.",
+        },
+        {
+          role: "user",
+          content: `${this.buildCaseSummaryPrompt(reports)}
+
+Return the requested JSON object with two non-empty Markdown strings:
+- tldr: 3-5 concise bullet points covering the key conclusions, affected cases and
+  platforms, priority next actions, and important uncertainty. Clearly identify
+  missing case analyses or inconclusive evidence; do not present these as confirmed passes.
+- details: the supporting root-cause analysis, direct versus cascading failures,
+  suspected false passes, concrete evidence references, and evidence gaps.
+
+Do not include the top-level TL;DR or Detailed Analysis headings; the report
+renderer supplies them. Use level-three or deeper headings within details.
+Keep both fields together under 500 words.`,
+        },
+      ],
+      max_completion_tokens: 1_200,
+      response_format: {
+        type: "json_schema",
+        json_schema: AGGREGATE_ANALYSIS_SCHEMA,
+      },
+    });
+    const parsed = this.parseJson<unknown>(content);
+    if (
+      typeof parsed !== "object" || parsed === null
+      || !("tldr" in parsed) || typeof parsed.tldr !== "string" || !parsed.tldr.trim()
+      || !("details" in parsed) || typeof parsed.details !== "string" || !parsed.details.trim()
+    ) {
+      throw new Error("Aggregate analysis must contain non-empty tldr and details strings");
+    }
+    return { tldr: parsed.tldr.trim(), details: parsed.details.trim() };
   }
 
   private getCaseAnalysisMaxTokens(): number {
