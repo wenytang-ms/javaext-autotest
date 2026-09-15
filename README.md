@@ -227,6 +227,24 @@ analyses and cluster matching root-cause fingerprints across plans and platforms
 created by older AutoTest versions remain readable; cases without the new `analysis` field
 fall back to their full failed-step reasons.
 
+Both commands share the same `summary.md` layout in `case` mode:
+
+1. **AI Analysis — TL;DR**: key conclusions, affected cases/platforms, priority actions,
+   and important uncertainty, shown before the results table.
+2. **E2E Test Results**: the existing result table and totals.
+3. **Detailed Analysis**: supporting AI analysis, followed by failed-step and crash details.
+
+One aggregate LLM request produces both the TL;DR and detailed analysis. The aggregate
+budget remains 1,200 tokens, separate from the case-analysis budget. If analysis is
+disabled, unconfigured, or fails (including truncated or invalid responses), the TL;DR
+section explicitly reports that analysis is unavailable; the table and original failure
+details remain visible. This does not change case results or command exit behavior.
+
+Legacy and evidence-only report layouts are unchanged. SDK callers can use
+`LLMClient.summarizeCaseResultsStructured()` for an `AggregateAnalysis` containing `tldr`
+and `details` Markdown strings; it rejects unavailable or invalid analysis. The existing
+string-returning summary methods remain compatible.
+
 ```yaml
 - id: "check-ls"
   action: "waitForLanguageServer"

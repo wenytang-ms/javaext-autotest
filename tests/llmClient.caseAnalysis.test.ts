@@ -104,6 +104,17 @@ function report(status: "pass" | "fail" = "fail"): TestReport {
   };
 }
 
+function mockCompletion(content: string, finishReason = "stop") {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: vi.fn().mockResolvedValue({
+      choices: [{ finish_reason: finishReason, message: { content } }],
+    }),
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
 describe("LLMClient case and matrix analysis", () => {
   it("sends the full scenario, execution evidence, logs, versions, and screenshots for failure RCA", async () => {
     const expected: CaseAnalysis = {
@@ -357,17 +368,14 @@ describe("LLMClient case and matrix analysis", () => {
     })).rejects.toThrow("truncated");
   });
 
-  it("summarizes case diagnoses, false-pass risks, and full legacy failure reasons", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: vi.fn().mockResolvedValue({
-        choices: [{
-          finish_reason: "stop",
-          message: { content: "Matrix summary" },
-        }],
-      }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it.each(["text", "structured"] as const)("summarizes case diagnoses and full legacy failure reasons (%s)", async (format) => {
+    const structured = {
+      tldr: "- Investigate the shared compiler failure and suspected false pass.",
+      details: "Matrix summary",
+    };
+    const fetchMock = mockCompletion(
+      format === "text" ? "Matrix summary" : JSON.stringify(structured),
+    );
     const failedReport = report();
     failedReport.evidence!.environment.runnerOs = "Windows";
     failedReport.analysis = {
@@ -427,19 +435,75 @@ describe("LLMClient case and matrix analysis", () => {
     const client = new LLMClient({
       endpoint: "https://example.openai.azure.com",
       apiKey: "test-key",
+      caseAnalysisMaxTokens: 0,
     });
 
-    await expect(client.summarizeCaseResults([
+    const reports = [
       failedReport,
       passedReport,
       legacyReport,
-    ])).resolves.toBe("Matrix summary");
+    ];
+    const analysis = format === "text"
+      ? client.summarizeCaseResults(reports)
+      : client.summarizeCaseResultsStructured(reports);
+    await expect(analysis).resolves.toEqual(format === "text" ? "Matrix summary" : structured);
 
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(request.max_completion_tokens).toBe(1_200);
+    if (format === "structured") {
+      expect(request.response_format.json_schema.name).toBe("aggregate_analysis");
+      expect(request.response_format.json_schema.strict).toBe(true);
+      expect(request.response_format.json_schema.schema.required).toEqual(["tldr", "details"]);
+    } else {
+      expect(request.response_format).toBeUndefined();
+    }
     const prompt = request.messages[1].content;
     expect(prompt).toContain("NoSuchFieldError:ConstructorDeclaration.constructorCall");
     expect(prompt).toContain("Java Basic Editing [Windows]");
     expect(prompt).toContain("The verifier matched stale output.");
     expect(prompt).toContain("ROOT_TOKEN_AT_END");
+  });
+
+  it.each([
+    "null",
+    "[]",
+    '{"details":"Diagnosis"}',
+    '{"tldr":"Conclusion"}',
+    '{"tldr":"","details":"Diagnosis"}',
+    '{"tldr":"Conclusion","details":"   "}',
+    '{"tldr":["Conclusion"],"details":"Diagnosis"}',
+  ])("rejects an incomplete structured aggregate instead of rendering a blank TL;DR: %s", async (content) => {
+    mockCompletion(content);
+    const client = new LLMClient({ endpoint: "https://example.openai.azure.com", apiKey: "test-key" });
+
+    await expect(client.summarizeCaseResultsStructured([report()]))
+      .rejects.toThrow("Aggregate analysis must contain non-empty tldr and details strings");
+  });
+
+  it("surfaces truncated aggregate responses", async () => {
+    mockCompletion('{"tldr":"Incomplete', "length");
+    const client = new LLMClient({ endpoint: "https://example.openai.azure.com", apiKey: "test-key" });
+
+    await expect(client.summarizeCaseResultsStructured([report()])).rejects.toThrow("truncated");
+  });
+
+  it("surfaces malformed aggregate JSON", async () => {
+    mockCompletion("Not JSON");
+    const client = new LLMClient({ endpoint: "https://example.openai.azure.com", apiKey: "test-key" });
+
+    await expect(client.summarizeCaseResultsStructured([report()]))
+      .rejects.toThrow("Could not parse Azure OpenAI JSON response");
+  });
+
+  it("reports missing configuration without issuing an aggregate request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new LLMClient({ endpoint: "", apiKey: "" });
+
+    await expect(client.summarizeCaseResultsStructured([report()])).rejects.toThrow("LLM not configured");
+    await expect(client.summarizeCaseResults([report()]))
+      .resolves.toBe("LLM not configured — skipping aggregate analysis");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

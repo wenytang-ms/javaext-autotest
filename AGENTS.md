@@ -442,6 +442,10 @@ AUTOTEST_CASE_ANALYSIS_MAX_TOKENS=4000
 - `case` analyzes every case: successful cases for false-pass risk and failed cases for
   evidence-based root cause. It does not change the case verdict.
 - `evidence-only` captures the bundle without LLM calls.
+- `run-all` and `analyze` in `case` mode render AI Analysis — TL;DR first, then the
+  results table, then detailed AI analysis and raw failure/crash details. One aggregate
+  request supplies both AI sections. If analysis is unavailable, say so explicitly
+  without dropping results or changing verdicts; legacy/evidence-only layouts stay unchanged.
 - Missing LLM configuration is recorded in `analysis.error`; evidence remains usable.
 - Case-analysis token budget: `LLMClientOptions.caseAnalysisMaxTokens` overrides
   `AUTOTEST_CASE_ANALYSIS_MAX_TOKENS`, which overrides the default of 4000. The selected

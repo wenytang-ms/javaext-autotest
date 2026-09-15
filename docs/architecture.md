@@ -53,7 +53,8 @@ Playwright Electron + @vscode/test-electron
 ```text
 src/
 ├── cli/
-│   └── index.ts
+│   ├── index.ts
+│   └── summary.ts
 ├── drivers/
 │   ├── vscodeDriver.ts
 │   └── operations/
@@ -307,6 +308,13 @@ or LLM submission.
 analyses. Exact root-cause fingerprints are pre-grouped before the aggregate LLM call;
 older reports without `analysis.case` fall back to their complete failed-step reasons.
 `analyze --report-only` preserves report generation while suppressing a failure exit code.
+
+Both commands use `src/cli/summary.ts` for aggregate reporting. In `case` mode, one
+structured LLM response provides `tldr` and `details`; the renderer places AI Analysis —
+TL;DR first, then the result table, then detailed AI analysis and original failure/crash
+details. Unavailable analysis is explicit in the first section without changing case
+reports or exit-code decisions. Legacy and evidence-only Markdown layouts remain unchanged,
+as do the existing string-returning SDK summary methods.
 
 ## Extension points
 

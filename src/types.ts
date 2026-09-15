@@ -383,6 +383,11 @@ export interface CaseAnalysis {
   confidence: number;
 }
 
+export interface AggregateAnalysis {
+  tldr: string;
+  details: string;
+}
+
 export interface TestAnalysis {
   schemaVersion: 1;
   mode: Exclude<AnalysisMode, "legacy">;
