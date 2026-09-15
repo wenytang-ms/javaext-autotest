@@ -7,6 +7,7 @@
  *   AZURE_OPENAI_API_KEY
  *   AZURE_OPENAI_DEPLOYMENT
  *   AZURE_OPENAI_API_VERSION
+ *   AUTOTEST_CASE_ANALYSIS_MAX_TOKENS
  */
 
 import type {
@@ -19,6 +20,8 @@ import type {
   TestReport,
   VerificationResult,
 } from "../types.js";
+
+const DEFAULT_CASE_ANALYSIS_MAX_TOKENS = 4_000;
 
 const SYSTEM_PROMPT = `You are a VSCode UI test verifier. You will receive:
 1. A BEFORE screenshot — the state before the action was performed
@@ -147,6 +150,8 @@ export interface LLMClientOptions {
   apiKey?: string;
   deployment?: string;
   apiVersion?: string;
+  /** Overrides AUTOTEST_CASE_ANALYSIS_MAX_TOKENS for case analysis only. */
+  caseAnalysisMaxTokens?: number;
 }
 
 export interface CaseScreenshot {
@@ -262,12 +267,16 @@ export class LLMClient {
   private apiKey: string;
   private deployment: string;
   private apiVersion: string;
+  private caseAnalysisMaxTokens: number | string;
 
   constructor(options: LLMClientOptions = {}) {
     this.endpoint = options.endpoint ?? process.env.AZURE_OPENAI_ENDPOINT ?? "";
     this.apiKey = options.apiKey ?? process.env.AZURE_OPENAI_API_KEY ?? "";
     this.deployment = options.deployment ?? process.env.AZURE_OPENAI_DEPLOYMENT ?? "gpt-4.1";
     this.apiVersion = options.apiVersion ?? process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview";
+    this.caseAnalysisMaxTokens = options.caseAnalysisMaxTokens
+      ?? process.env.AUTOTEST_CASE_ANALYSIS_MAX_TOKENS
+      ?? DEFAULT_CASE_ANALYSIS_MAX_TOKENS;
   }
 
   isConfigured(): boolean {
@@ -364,6 +373,7 @@ export class LLMClient {
       throw new Error("LLM not configured");
     }
 
+    const maxCompletionTokens = this.getCaseAnalysisMaxTokens();
     const failed = input.report.crashed
       || input.report.summary.failed + input.report.summary.errors > 0;
     const payload = {
@@ -408,7 +418,7 @@ export class LLMClient {
         { role: "system", content: CASE_ANALYSIS_SYSTEM_PROMPT },
         { role: "user", content },
       ],
-      max_completion_tokens: 1_800,
+      max_completion_tokens: maxCompletionTokens,
       response_format: {
         type: "json_schema",
         json_schema: CASE_ANALYSIS_SCHEMA,
@@ -628,6 +638,22 @@ Keep the summary under 500 words.`;
     } catch (e) {
       return `LLM analysis failed: ${(e as Error).message}`;
     }
+  }
+
+  private getCaseAnalysisMaxTokens(): number {
+    const configured = this.caseAnalysisMaxTokens;
+    const tokens = typeof configured === "string" ? Number(configured) : configured;
+    if (
+      (typeof configured === "string" && !/^[0-9]+$/.test(configured.trim()))
+      || !Number.isSafeInteger(tokens)
+      || tokens <= 0
+    ) {
+      throw new Error(
+        "Case analysis token limit must be a positive safe integer. "
+        + "Check LLMClientOptions.caseAnalysisMaxTokens or AUTOTEST_CASE_ANALYSIS_MAX_TOKENS.",
+      );
+    }
+    return tokens;
   }
 
   private getUrl(): string {

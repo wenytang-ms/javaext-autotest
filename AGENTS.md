@@ -435,6 +435,7 @@ AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/
 AZURE_OPENAI_API_KEY=<key>
 AZURE_OPENAI_DEPLOYMENT=gpt-4.1
 AZURE_OPENAI_API_VERSION=2024-12-01-preview
+AUTOTEST_CASE_ANALYSIS_MAX_TOKENS=4000
 ```
 
 - `legacy` is the default and does not load the probe or change the historical report shape.
@@ -442,6 +443,10 @@ AZURE_OPENAI_API_VERSION=2024-12-01-preview
   evidence-based root cause. It does not change the case verdict.
 - `evidence-only` captures the bundle without LLM calls.
 - Missing LLM configuration is recorded in `analysis.error`; evidence remains usable.
+- Case-analysis token budget: `LLMClientOptions.caseAnalysisMaxTokens` overrides
+  `AUTOTEST_CASE_ANALYSIS_MAX_TOKENS`, which overrides the default of 4000. The selected
+  value must be a positive safe integer. Invalid values fail case analysis only; step
+  verification, aggregate budgets, and test verdicts are unchanged.
 
 ## Environment Requirements
 

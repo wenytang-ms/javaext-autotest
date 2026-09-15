@@ -206,6 +206,22 @@ experiment. Passing cases are audited for no-op actions, stale state, weak asser
 hidden errors, and other false-pass risks. Results are stored under the optional top-level
 `analysis` field and, when successful, in `analysis/case-analysis.json`.
 
+Each case-analysis request defaults to a 4,000-token completion budget. Set
+`AUTOTEST_CASE_ANALYSIS_MAX_TOKENS` to override it in the CLI, or pass
+`caseAnalysisMaxTokens` to the SDK's `LLMClient`. Precedence is SDK option, then environment
+variable, then the default. The selected value must be a positive safe integer; environment
+values use decimal digits, with optional surrounding whitespace.
+
+```typescript
+import { LLMClient } from "@vscjava/vscode-autotest";
+
+const llm = new LLMClient({ caseAnalysisMaxTokens: 6000 });
+```
+
+This setting applies only to case analysis, not step verification or aggregate summaries.
+Invalid values fail case analysis before sending the request. The runner records these
+errors, as well as truncated responses, in `analysis.error` without changing the test verdict.
+
 `run-all --analysis-mode case` and `analyze --analysis-mode case` aggregate those case
 analyses and cluster matching root-cause fingerprints across plans and platforms. Reports
 created by older AutoTest versions remain readable; cases without the new `analysis` field
@@ -226,6 +242,7 @@ export AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com/
 export AZURE_OPENAI_API_KEY=<key>
 export AZURE_OPENAI_DEPLOYMENT=gpt-4.1       # Optional, default: gpt-4.1
 export AZURE_OPENAI_API_VERSION=2024-12-01-preview
+export AUTOTEST_CASE_ANALYSIS_MAX_TOKENS=4000 # Optional, default: 4000
 ```
 
 - If Azure OpenAI is not configured, `case` mode still writes evidence and records
