@@ -8,6 +8,7 @@
  *   AZURE_OPENAI_DEPLOYMENT
  *   AZURE_OPENAI_API_VERSION
  *   AUTOTEST_CASE_ANALYSIS_MAX_TOKENS
+ *   AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS
  */
 
 import type {
@@ -23,6 +24,7 @@ import type {
 } from "../types.js";
 
 const DEFAULT_CASE_ANALYSIS_MAX_TOKENS = 4_000;
+const DEFAULT_AGGREGATE_ANALYSIS_MAX_TOKENS = 8_000;
 
 const SYSTEM_PROMPT = `You are a VSCode UI test verifier. You will receive:
 1. A BEFORE screenshot — the state before the action was performed
@@ -167,6 +169,8 @@ export interface LLMClientOptions {
   apiVersion?: string;
   /** Overrides AUTOTEST_CASE_ANALYSIS_MAX_TOKENS for case analysis only. */
   caseAnalysisMaxTokens?: number;
+  /** Overrides AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS for case-aggregate analysis only. */
+  aggregateAnalysisMaxTokens?: number;
 }
 
 export interface CaseScreenshot {
@@ -223,7 +227,7 @@ function limitText(value: string | undefined, maxLength: number): string | undef
   return `${redacted.slice(0, maxLength)}\n...[truncated ${redacted.length - maxLength} characters]`;
 }
 
-function compactEvidence(evidence: FailureEvidence | undefined): unknown {
+function compactEvidence(evidence: FailureEvidence | undefined) {
   if (!evidence) return undefined;
   const compactDiagnostic = (diagnostic: FailureEvidence["diagnostics"][number]) => ({
     ...diagnostic,
@@ -283,6 +287,7 @@ export class LLMClient {
   private deployment: string;
   private apiVersion: string;
   private caseAnalysisMaxTokens: number | string;
+  private aggregateAnalysisMaxTokens: number | string;
 
   constructor(options: LLMClientOptions = {}) {
     this.endpoint = options.endpoint ?? process.env.AZURE_OPENAI_ENDPOINT ?? "";
@@ -292,6 +297,9 @@ export class LLMClient {
     this.caseAnalysisMaxTokens = options.caseAnalysisMaxTokens
       ?? process.env.AUTOTEST_CASE_ANALYSIS_MAX_TOKENS
       ?? DEFAULT_CASE_ANALYSIS_MAX_TOKENS;
+    this.aggregateAnalysisMaxTokens = options.aggregateAnalysisMaxTokens
+      ?? process.env.AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS
+      ?? DEFAULT_AGGREGATE_ANALYSIS_MAX_TOKENS;
   }
 
   isConfigured(): boolean {
@@ -388,7 +396,7 @@ export class LLMClient {
       throw new Error("LLM not configured");
     }
 
-    const maxCompletionTokens = this.getCaseAnalysisMaxTokens();
+    const maxCompletionTokens = this.getAnalysisMaxTokens("case");
     const failed = input.report.crashed
       || input.report.summary.failed + input.report.summary.errors > 0;
     const payload = {
@@ -555,13 +563,25 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
   }
 
   private buildCaseSummaryPrompt(reports: TestReport[]): string {
+    const observations = new Map<string, { reference: string; value: unknown }>();
+    const referenceObservation = (value: object | undefined): string | undefined => {
+      if (value === undefined) return undefined;
+      const sanitized = sanitizeForLlm(value);
+      const key = JSON.stringify(sanitized);
+      let observation = observations.get(key);
+      if (!observation) {
+        observation = { reference: `observation-${observations.size + 1}`, value: sanitized };
+        observations.set(key, observation);
+      }
+      return observation.reference;
+    };
     const clusters = new Map<string, {
       cases: Set<string>;
       summaries: Set<string>;
       components: Set<string>;
       evidence: Set<string>;
     }>();
-    const cases = reports.map((report) => {
+    const cases = reports.map((report, index) => {
       const runnerOs = report.evidence?.environment.runnerOs
         ?? report.evidence?.environment.platform;
       const caseId = runnerOs ? `${report.planName} [${runnerOs}]` : report.planName;
@@ -573,7 +593,7 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
           components: new Set<string>(),
           evidence: new Set<string>(),
         };
-        cluster.cases.add(caseId);
+        cluster.cases.add(`case-${index + 1}: ${caseId}`);
         cluster.summaries.add(rootCause.summary);
         cluster.components.add(rootCause.suspectedComponent);
         for (const citation of rootCause.evidence.slice(0, 5)) {
@@ -583,6 +603,7 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
       }
 
       return {
+        reference: `case-${index + 1}`,
         caseId,
         runnerVerdict: report.crashed
           ? "crashed"
@@ -592,16 +613,32 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
         summary: report.summary,
         caseAnalysis: report.analysis?.case,
         analysisError: report.analysis?.error,
-        legacyFailures: report.analysis?.case
-          ? undefined
-          : report.results
-              .filter((step) => step.status === "fail" || step.status === "error")
-              .map((step) => ({
-                stepId: step.stepId,
-                action: step.action,
-                reason: limitText(step.reason, 8_000),
-                signatures: step.evidence?.signatures,
-              })),
+        recordedFailures: report.results
+          .filter((step) => step.status === "fail" || step.status === "error")
+          .map((step) => {
+            const evidence = compactEvidence(step.evidence);
+            return {
+              stepId: step.stepId,
+              action: step.action,
+              reason: limitText(step.reason, 8_000),
+              llmVerification: step.llmVerification,
+              evidence: evidence ? {
+                capturedAt: evidence.capturedAt,
+                collectionErrors: evidence.collectionErrors,
+                problemCounts: evidence.problemCounts,
+                activeEditor: evidence.activeEditor,
+                diagnosticsRef: referenceObservation(evidence.diagnostics),
+                visibleProblemsRef: referenceObservation(evidence.visibleProblems),
+                signaturesRef: referenceObservation(evidence.signatures),
+              } : undefined,
+            };
+          }),
+        runtimeSignalsRef: referenceObservation(report.evidence ? {
+          collectionErrors: report.evidence.collectionErrors,
+          installedExtensions: report.evidence.installedExtensions,
+          bundledArtifacts: report.evidence.bundledArtifacts,
+          signatures: report.evidence.signatures.slice(0, 10).map((value) => limitText(value, 2_000)),
+        } : undefined),
       };
     });
     const clusterSummary = [...clusters.entries()].map(([fingerprint, cluster]) => ({
@@ -613,16 +650,32 @@ Keep it concise (under 300 words). Use plain text, no markdown.`;
     }));
 
     return `Summarize the analyses from an E2E test matrix.
-Treat each case analysis as a diagnosis backed by its own evidence. Merge root
-causes only when their fingerprints or supporting evidence indicate the same
-underlying issue. Highlight suspected false passes, cross-platform patterns,
-direct failures versus cascading failures, disagreements, and evidence gaps.
+Case analyses are model-generated hypotheses, not independently confirmed facts.
+Compare them with recorded failures and runtime signals. A reason prefixed with
+[LLM] or a screenshot-verification judgment is a model opinion, not direct proof.
+Preserve conflicting observations and missing evidence instead of resolving them
+by model confidence or majority vote.
+
+Merge root causes only when supporting evidence indicates the same underlying
+issue. Matching fingerprints are candidate groups, not proof of shared causality;
+generic symptoms such as timeouts must not be merged without supporting evidence.
+Highlight suspected false passes, cross-platform patterns, direct versus cascading
+failures, disagreements, and evidence gaps. A suspected false pass is an audit
+warning, not a confirmed failed case or permission to change the runner verdict.
+
+Fields ending in Ref point to shared recorded observations, deduplicated only to
+avoid repeating identical input. These references are not inferred root-cause
+groups or artifact paths. Attribute an observation to the case/step that references
+it and cite original evidence artifacts when available.
 
 Cases:
-${JSON.stringify(sanitizeForLlm(cases), null, 2)}
+${JSON.stringify(sanitizeForLlm(cases))}
 
-Pre-grouped exact root-cause fingerprints:
-${JSON.stringify(sanitizeForLlm(clusterSummary), null, 2)}
+Shared recorded observations:
+${JSON.stringify([...observations.values()])}
+
+Candidate groups by exact root-cause fingerprint:
+${JSON.stringify(sanitizeForLlm(clusterSummary))}
 
 Provide:
 1. Overall matrix health
@@ -630,9 +683,7 @@ Provide:
 3. Root-cause clusters ranked by impact
 4. Affected cases and platforms
 5. Important evidence gaps or contradictory diagnoses
-6. Up to three recommended next actions
-
-Keep the summary under 500 words.`;
+6. Up to three recommended next actions`;
   }
 
   async summarizeCaseResults(reports: TestReport[]): Promise<string> {
@@ -641,15 +692,16 @@ Keep the summary under 500 words.`;
     }
 
     try {
+      const maxCompletionTokens = this.getAnalysisMaxTokens("aggregate");
       const { content } = await this.requestCompletion({
         messages: [
           {
             role: "system",
             content: "You summarize evidence-backed case analyses without inventing new root causes.",
           },
-          { role: "user", content: this.buildCaseSummaryPrompt(reports) },
+          { role: "user", content: `${this.buildCaseSummaryPrompt(reports)}\n\nKeep the summary under 500 words.` },
         ],
-        max_completion_tokens: 1_200,
+        max_completion_tokens: maxCompletionTokens,
       });
       return content;
     } catch (e) {
@@ -662,6 +714,7 @@ Keep the summary under 500 words.`;
       throw new Error("LLM not configured");
     }
 
+    const maxCompletionTokens = this.getAnalysisMaxTokens("aggregate");
     const { content } = await this.requestCompletion({
       messages: [
         {
@@ -673,18 +726,28 @@ Keep the summary under 500 words.`;
           content: `${this.buildCaseSummaryPrompt(reports)}
 
 Return the requested JSON object with two non-empty Markdown strings:
-- tldr: 3-5 concise bullet points covering the key conclusions, affected cases and
+- tldr: 3-5 concise bullet points (at most 150 words) covering key conclusions, affected cases and
   platforms, priority next actions, and important uncertainty. Clearly identify
   missing case analyses or inconclusive evidence; do not present these as confirmed passes.
-- details: the supporting root-cause analysis, direct versus cascading failures,
-  suspected false passes, concrete evidence references, and evidence gaps.
+- details: organize by evidence-backed problems ranked by impact, NOT a list of
+  every failed step. For each problem include:
+  1. Observed failure versus the suspected cause, clearly distinguishing the two.
+  2. Affected case names/platforms and their provided case references.
+  3. The earliest supported divergence and direct versus cascading failures.
+  4. Concrete evidence references and what each establishes.
+  5. Contradictory observations, unverified assumptions, and evidence gaps.
+  6. The smallest next action that could confirm or disprove the hypothesis.
+  Discuss passing-case audit warnings separately from runner failures. Do not
+  invent an issue category, causal link, artifact, or verification that is absent
+  from the supplied evidence. When evidence is insufficient, keep cases separate.
 
 Do not include the top-level TL;DR or Detailed Analysis headings; the report
-renderer supplies them. Use level-three or deeper headings within details.
-Keep both fields together under 500 words.`,
+renderer supplies them. Use level-four or deeper headings within details.
+Keep details concise by explaining shared causes once, not by cutting off evidence.
+The 150-word limit applies only to tldr, not details.`,
         },
       ],
-      max_completion_tokens: 1_200,
+      max_completion_tokens: maxCompletionTokens,
       response_format: {
         type: "json_schema",
         json_schema: AGGREGATE_ANALYSIS_SCHEMA,
@@ -701,8 +764,8 @@ Keep both fields together under 500 words.`,
     return { tldr: parsed.tldr.trim(), details: parsed.details.trim() };
   }
 
-  private getCaseAnalysisMaxTokens(): number {
-    const configured = this.caseAnalysisMaxTokens;
+  private getAnalysisMaxTokens(kind: "case" | "aggregate"): number {
+    const configured = kind === "case" ? this.caseAnalysisMaxTokens : this.aggregateAnalysisMaxTokens;
     const tokens = typeof configured === "string" ? Number(configured) : configured;
     if (
       (typeof configured === "string" && !/^[0-9]+$/.test(configured.trim()))
@@ -710,8 +773,8 @@ Keep both fields together under 500 words.`,
       || tokens <= 0
     ) {
       throw new Error(
-        "Case analysis token limit must be a positive safe integer. "
-        + "Check LLMClientOptions.caseAnalysisMaxTokens or AUTOTEST_CASE_ANALYSIS_MAX_TOKENS.",
+        `${kind === "case" ? "Case" : "Aggregate"} analysis token limit must be a positive safe integer. `
+        + `Check LLMClientOptions.${kind}AnalysisMaxTokens or AUTOTEST_${kind.toUpperCase()}_ANALYSIS_MAX_TOKENS.`,
       );
     }
     return tokens;

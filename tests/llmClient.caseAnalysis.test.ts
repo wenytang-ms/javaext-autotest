@@ -4,6 +4,7 @@ import type { CaseAnalysis, TestPlan, TestReport } from "../src/types.js";
 
 beforeEach(() => {
   vi.stubEnv("AUTOTEST_CASE_ANALYSIS_MAX_TOKENS", undefined);
+  vi.stubEnv("AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS", undefined);
 });
 
 afterEach(() => {
@@ -23,13 +24,11 @@ const plan: TestPlan = {
   },
   steps: [{
     id: "ls-ready",
-    action: "wait",
-    target: "language server",
+    action: "waitForLanguageServer",
     verify: "Problems contains 0 errors",
   }, {
     id: "apply-code-action",
-    action: "executeCommand",
-    command: "java.apply.workspaceEdit",
+    action: "executeVSCodeCommand java.apply.workspaceEdit",
     verify: "code action completed",
   }],
 };
@@ -38,11 +37,13 @@ function report(status: "pass" | "fail" = "fail"): TestReport {
   const failed = status === "fail";
   return {
     planName: plan.name,
+    startTime: "2026-09-12T09:59:58.000Z",
+    endTime: "2026-09-12T10:00:01.000Z",
     duration: 3_000,
     crashed: false,
     results: [{
       stepId: "ls-ready",
-      action: "wait",
+      action: "waitForLanguageServer",
       status,
       reason: failed ? "Expected 0 errors, got 3" : "Problems contains 0 errors",
       duration: 1_000,
@@ -61,7 +62,7 @@ function report(status: "pass" | "fail" = "fail"): TestReport {
       } : undefined,
     }, {
       stepId: "apply-code-action",
-      action: "executeCommand",
+      action: "executeVSCodeCommand java.apply.workspaceEdit",
       status: failed ? "error" : "pass",
       reason: failed ? "Code action not found" : "code action completed",
       duration: 2_000,
@@ -344,7 +345,7 @@ describe("LLMClient case and matrix analysis", () => {
     await expect(client.summarizeCaseResults([])).resolves.toBe("Summary");
     expect(fetchMock.mock.calls.map((call) =>
       JSON.parse(String(call[1]?.body)).max_completion_tokens
-    )).toEqual([800, 600, 1_200]);
+    )).toEqual([800, 600, 8_000]);
   });
 
   it("surfaces truncated structured responses instead of parsing incomplete JSON", async () => {
@@ -450,11 +451,13 @@ describe("LLMClient case and matrix analysis", () => {
 
     const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(request.max_completion_tokens).toBe(1_200);
+    expect(request.max_completion_tokens).toBe(8_000);
     if (format === "structured") {
       expect(request.response_format.json_schema.name).toBe("aggregate_analysis");
       expect(request.response_format.json_schema.strict).toBe(true);
       expect(request.response_format.json_schema.schema.required).toEqual(["tldr", "details"]);
+      expect(request.messages[1].content).not.toContain("under 500 words");
+      expect(request.messages[1].content).toContain("NOT a list of");
     } else {
       expect(request.response_format).toBeUndefined();
     }
@@ -463,6 +466,65 @@ describe("LLMClient case and matrix analysis", () => {
     expect(prompt).toContain("Java Basic Editing [Windows]");
     expect(prompt).toContain("The verifier matched stale output.");
     expect(prompt).toContain("ROOT_TOKEN_AT_END");
+    expect(prompt).toContain('"recordedFailures"');
+    expect(prompt).toContain("Expected 0 errors, got 3");
+    expect(prompt).toContain('"runtimeSignalsRef"');
+    expect(prompt).toContain('"reference":"case-1"');
+    expect(prompt).toContain("not independently confirmed facts");
+    expect(prompt).toContain("candidate groups, not proof");
+    expect(prompt).toContain("contradict");
+    expect(prompt).not.toContain("private-user");
+  });
+
+  it("deduplicates recorded observations without losing step attribution, bounds, or redaction", async () => {
+    const r = report();
+    r.results[0].llmVerification = {
+      passed: false,
+      reasoning: "The screenshot may show an incomplete import.",
+      confidence: 0.9,
+    };
+    r.results[1].evidence = structuredClone(r.results[0].evidence);
+    r.results[1].evidence!.capturedAt = "2026-09-12T10:00:01.000Z";
+    r.evidence!.collectionErrors = ["A runtime log could not be read."];
+    r.evidence!.signatures = [
+      `${"x".repeat(2_050)}SHOULD_BE_TRUNCATED`,
+      "api-key=synthetic-secret",
+      ...Array.from({ length: 10 }, (_, index) => `signature-${index + 2}`),
+    ];
+    const duplicate = structuredClone(r);
+    duplicate.planName = "Another Case";
+    const reports = [r, duplicate];
+    const original = JSON.stringify(reports);
+    const fetchMock = mockCompletion(JSON.stringify({ tldr: "- Review evidence.", details: "Inspect the first divergence." }));
+    const client = new LLMClient({ endpoint: "https://example.openai.azure.com", apiKey: "test-key" });
+
+    await client.summarizeCaseResultsStructured(reports);
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const prompt: string = request.messages[1].content;
+    const cases = JSON.parse(prompt.split("Cases:\n")[1].split("\n\nShared recorded observations:")[0]);
+    const observations = JSON.parse(prompt.split("Shared recorded observations:\n")[1].split("\n\nCandidate groups")[0]);
+
+    expect(cases[0].runtimeSignalsRef).toBe(cases[1].runtimeSignalsRef);
+    const first = cases[0].recordedFailures[0];
+    const second = cases[0].recordedFailures[1];
+    expect(first.evidence.diagnosticsRef).toBe(second.evidence.diagnosticsRef);
+    expect(first.evidence.diagnosticsRef).toBe(cases[1].recordedFailures[0].evidence.diagnosticsRef);
+    expect(first.evidence.capturedAt).not.toBe(second.evidence.capturedAt);
+    expect(first.stepId).toBe("ls-ready");
+    expect(second.stepId).toBe("apply-code-action");
+    expect(first.llmVerification.reasoning).toContain("incomplete import");
+    expect(observations).toHaveLength(3);
+    expect(prompt.match(/ConstructorDeclaration\.constructorCall/g)).toHaveLength(2);
+    expect(prompt).toContain("not inferred root-cause");
+    expect(prompt).toContain("A runtime log could not be read.");
+    expect(prompt).not.toContain("SHOULD_BE_TRUNCATED");
+    expect(prompt).not.toContain("synthetic-secret");
+    expect(prompt).not.toContain("private-user");
+    expect(prompt).toContain("<redacted>");
+    const signals = observations.find((item: { reference: string }) => item.reference === cases[0].runtimeSignalsRef).value;
+    expect(signals.signatures).toHaveLength(10);
+    expect(signals.signatures[0]).toContain("[truncated");
+    expect(JSON.stringify(reports)).toBe(original);
   });
 
   it.each([
@@ -505,5 +567,99 @@ describe("LLMClient case and matrix analysis", () => {
     await expect(client.summarizeCaseResults([report()]))
       .resolves.toBe("LLM not configured — skipping aggregate analysis");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { source: "default", env: undefined, sdk: undefined, expected: 8_000 },
+    { source: "environment", env: "16000", sdk: undefined, expected: 16_000 },
+    { source: "padded environment", env: " 12000 ", sdk: undefined, expected: 12_000 },
+    { source: "minimum positive value", env: "1", sdk: undefined, expected: 1 },
+    { source: "SDK", env: undefined, sdk: 24_000, expected: 24_000 },
+    { source: "SDK over environment", env: "16000", sdk: 12_000, expected: 12_000 },
+    { source: "SDK over invalid environment", env: "invalid", sdk: 12_000, expected: 12_000 },
+  ])("uses the $source aggregate budget for both SDK summary methods", async ({ env, sdk, expected }) => {
+    vi.stubEnv("AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS", env);
+    const content = { tldr: "- Inspect the failure.", details: "The runtime did not initialize." };
+    const fetchMock = mockCompletion(JSON.stringify(content));
+    const client = new LLMClient({
+      endpoint: "https://example.openai.azure.com",
+      apiKey: "test-key",
+      caseAnalysisMaxTokens: 0,
+      aggregateAnalysisMaxTokens: sdk,
+    });
+
+    await expect(client.summarizeCaseResultsStructured([report()])).resolves.toEqual(content);
+    await expect(client.summarizeCaseResults([report()])).resolves.toBe(JSON.stringify(content));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).max_completion_tokens))
+      .toEqual([expected, expected]);
+  });
+
+  it.each([
+    "", " ", "0", "-1", "1.5", "8k", "8000tokens", "NaN", "Infinity",
+    "0x1000", "1e3", "9007199254740992",
+  ])("rejects invalid aggregate environment budget %j without issuing a request", async (value) => {
+    vi.stubEnv("AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS", value);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new LLMClient({ endpoint: "https://example.openai.azure.com", apiKey: "test-key" });
+    const message = "Aggregate analysis token limit must be a positive safe integer. "
+      + "Check LLMClientOptions.aggregateAnalysisMaxTokens or AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS.";
+
+    await expect(client.summarizeCaseResultsStructured([report()])).rejects.toThrow(message);
+    await expect(client.summarizeCaseResults([report()])).resolves.toBe(`LLM analysis failed: ${message}`);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1,
+  ])("rejects invalid aggregate SDK budget %s instead of falling back", async (value) => {
+    vi.stubEnv("AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS", "8000");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new LLMClient({
+      endpoint: "https://example.openai.azure.com",
+      apiKey: "test-key",
+      aggregateAnalysisMaxTokens: value,
+    });
+
+    await expect(client.summarizeCaseResultsStructured([report()]))
+      .rejects.toThrow("Aggregate analysis token limit must be a positive safe integer");
+    await expect(client.summarizeCaseResults([report()]))
+      .resolves.toContain("Aggregate analysis token limit must be a positive safe integer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not validate or apply aggregate configuration to case, step, or legacy requests", async () => {
+    vi.stubEnv("AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS", "invalid");
+    const client = new LLMClient({
+      endpoint: "https://example.openai.azure.com",
+      apiKey: "test-key",
+      aggregateAnalysisMaxTokens: 0,
+    });
+    const analysis: CaseAnalysis = {
+      schemaVersion: 1,
+      kind: "pass-audit",
+      assessment: "confirmed-pass",
+      summary: "Expected outcomes have supporting evidence.",
+      earliestDivergence: { observation: "None identified." },
+      rootCauses: [],
+      falsePassRisks: [],
+      evidenceGaps: [],
+      confidence: 0.9,
+    };
+    const caseFetch = mockCompletion(JSON.stringify(analysis));
+    await expect(client.analyzeCase({ plan, report: report("pass") })).resolves.toEqual(analysis);
+    expect(JSON.parse(String(caseFetch.mock.calls[0]?.[1]?.body)).max_completion_tokens).toBe(4_000);
+
+    const verification = { passed: true, reasoning: "Expected state is visible.", confidence: 0.9 };
+    const stepFetch = mockCompletion(JSON.stringify(verification));
+    await expect(client.verifyStep("before", "after", "wait", "Expected state is visible"))
+      .resolves.toEqual(verification);
+    expect(JSON.parse(String(stepFetch.mock.calls[0]?.[1]?.body)).max_completion_tokens).toBe(800);
+
+    const legacyFetch = mockCompletion("Summary");
+    await expect(client.summarizeResults([])).resolves.toBe("Summary");
+    expect(JSON.parse(String(legacyFetch.mock.calls[0]?.[1]?.body)).max_completion_tokens).toBe(600);
   });
 });
