@@ -59,4 +59,42 @@ describe("analyze CLI summary output", () => {
     expect(markdown).toContain("Runtime initialization timed out");
     expect(fs.readFileSync(reportPath, "utf8")).toBe(original);
   }, 30_000);
+
+  it("reuses an existing case diagnosis and preserves full recorded errors without making LLM calls", () => {
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf8")) as TestReport;
+    const fullReason = `${"Long diagnostic context. ".repeat(12)}COMPLETE_REASON_END`;
+    report.results[0].reason = fullReason;
+    report.analysis = {
+      schemaVersion: 1,
+      mode: "case",
+      case: {
+        schemaVersion: 1,
+        kind: "failure-root-cause",
+        assessment: "inconclusive",
+        summary: "Saved diagnosis survives aggregate unavailability.",
+        earliestDivergence: { stepId: "ready", observation: "Runtime did not become ready." },
+        rootCauses: [],
+        falsePassRisks: [],
+        evidenceGaps: ["No startup trace was captured."],
+        confidence: 0.4,
+      },
+    };
+    fs.writeFileSync(reportPath, JSON.stringify(report));
+    const result = spawnSync(process.execPath, [
+      "--import", "tsx",
+      path.join(root, "src", "cli", "index.ts"),
+      "analyze", outputDir,
+      "--analysis-mode", "case",
+      "--no-llm",
+      "--report-only",
+    ], { cwd: root, encoding: "utf8", timeout: 20_000 });
+
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    const markdown = fs.readFileSync(path.join(outputDir, "summary.md"), "utf8");
+    expect(markdown).toContain("Saved diagnosis survives aggregate unavailability.");
+    expect(markdown).toContain("No startup trace was captured.");
+    expect(markdown).toContain(fullReason);
+    expect(markdown).toContain("Raw execution failures");
+  }, 30_000);
 });

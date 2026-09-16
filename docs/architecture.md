@@ -311,10 +311,26 @@ older reports without `analysis.case` fall back to their complete failed-step re
 
 Both commands use `src/cli/summary.ts` for aggregate reporting. In `case` mode, one
 structured LLM response provides `tldr` and `details`; the renderer places AI Analysis —
-TL;DR first, then the result table, then detailed AI analysis and original failure/crash
-details. Unavailable analysis is explicit in the first section without changing case
-reports or exit-code decisions. Legacy and evidence-only Markdown layouts remain unchanged,
-as do the existing string-returning SDK summary methods.
+TL;DR first, then the result table, then analysis coverage and evidence-backed problem
+groups. Recorded failures and runtime signals are supplied alongside case-model opinions;
+matching fingerprints alone do not establish shared causality.
+Identical diagnostic sets and runtime signals are sent once as shared observations;
+each case/step retains its reference and snapshot context. This reduces repeated input
+without treating identical observations as confirmed root-cause groups.
+
+Saved per-case hypotheses, diagnostic snapshots, evidence citations, direct/cascading step
+mappings, audit warnings, and gaps are rendered independently of aggregate availability.
+They provide a fallback without making another LLM call or inferring cross-case groups.
+Raw failure/crash reasons are folded and displayed completely rather than clipped to 150
+characters. Diagnostic snapshots are folded after the hypotheses and confirming actions.
+Model assessments and confidence remain advisory; missing analyses are explicit.
+
+Case-aggregate calls use `aggregateAnalysisMaxTokens`, then
+`AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS`, then an 8000-token default. Validation is deferred
+until an aggregate call so unrelated paths are unaffected. The separate case-analysis
+budget, legacy/step budgets, case JSON, verdicts, and exit-code decisions are unchanged.
+Legacy and evidence-only Markdown layouts remain unchanged, as do the return types of
+the existing SDK summary methods.
 
 ## Extension points
 

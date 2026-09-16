@@ -436,6 +436,7 @@ AZURE_OPENAI_API_KEY=<key>
 AZURE_OPENAI_DEPLOYMENT=gpt-4.1
 AZURE_OPENAI_API_VERSION=2024-12-01-preview
 AUTOTEST_CASE_ANALYSIS_MAX_TOKENS=4000
+AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS=8000
 ```
 
 - `legacy` is the default and does not load the probe or change the historical report shape.
@@ -443,14 +444,22 @@ AUTOTEST_CASE_ANALYSIS_MAX_TOKENS=4000
   evidence-based root cause. It does not change the case verdict.
 - `evidence-only` captures the bundle without LLM calls.
 - `run-all` and `analyze` in `case` mode render AI Analysis — TL;DR first, then the
-  results table, then detailed AI analysis and raw failure/crash details. One aggregate
-  request supplies both AI sections. If analysis is unavailable, say so explicitly
-  without dropping results or changing verdicts; legacy/evidence-only layouts stay unchanged.
+  results table, then evidence-backed detailed analysis and coverage. One aggregate
+  request supplies both AI sections. If it is unavailable, show saved case RCA/audits
+  independently rather than guessing shared causes or showing only raw failures.
+  Keep model hypotheses distinct from recorded evidence, label audit warnings as advisory,
+  and fold captured diagnostics and full original failure/crash reasons.
+  Legacy/evidence-only layouts stay unchanged.
 - Missing LLM configuration is recorded in `analysis.error`; evidence remains usable.
 - Case-analysis token budget: `LLMClientOptions.caseAnalysisMaxTokens` overrides
   `AUTOTEST_CASE_ANALYSIS_MAX_TOKENS`, which overrides the default of 4000. The selected
   value must be a positive safe integer. Invalid values fail case analysis only; step
   verification, aggregate budgets, and test verdicts are unchanged.
+- Case-aggregate budget: `LLMClientOptions.aggregateAnalysisMaxTokens` overrides
+  `AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS`, which overrides the default of 8000.
+  Validate lazily for both case-aggregate SDK methods; do not apply it to step verification,
+  individual case analysis, or legacy `summarizeResults()`. Invalid/truncated aggregate
+  responses must leave the report and existing per-case analyses usable.
 
 ## Environment Requirements
 

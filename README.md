@@ -223,7 +223,7 @@ Invalid values fail case analysis before sending the request. The runner records
 errors, as well as truncated responses, in `analysis.error` without changing the test verdict.
 
 `run-all --analysis-mode case` and `analyze --analysis-mode case` aggregate those case
-analyses and cluster matching root-cause fingerprints across plans and platforms. Reports
+analyses using evidence-backed root-cause groups across plans and platforms. Reports
 created by older AutoTest versions remain readable; cases without the new `analysis` field
 fall back to their full failed-step reasons.
 
@@ -232,13 +232,51 @@ Both commands share the same `summary.md` layout in `case` mode:
 1. **AI Analysis — TL;DR**: key conclusions, affected cases/platforms, priority actions,
    and important uncertainty, shown before the results table.
 2. **E2E Test Results**: the existing result table and totals.
-3. **Detailed Analysis**: supporting AI analysis, followed by failed-step and crash details.
+3. **Detailed Analysis**: analysis coverage, evidence-backed problem groups from the
+   aggregate model, saved case diagnoses/audits, and folded original execution failures.
 
-One aggregate LLM request produces both the TL;DR and detailed analysis. The aggregate
-budget remains 1,200 tokens, separate from the case-analysis budget. If analysis is
-disabled, unconfigured, or fails (including truncated or invalid responses), the TL;DR
-section explicitly reports that analysis is unavailable; the table and original failure
-details remain visible. This does not change case results or command exit behavior.
+One aggregate LLM request produces both the TL;DR and detailed analysis. Each problem
+should identify its affected cases/platforms, earliest supported divergence, direct and
+cascading failures, evidence, uncertainty, and a confirming action. Recorded failures
+and runtime signals accompany the model-generated case diagnoses; matching fingerprints
+are only candidate groups, not proof of a common cause. The TL;DR stays short, while
+detailed analysis is no longer subject to a shared 500-word limit. Identical recorded
+observations are supplied once with per-case/step references to avoid inflating the
+aggregate input; this deduplication does not establish shared causality.
+
+Case-mode aggregation defaults to an **8,000-token completion budget**. Configure it with
+`LLMClientOptions.aggregateAnalysisMaxTokens` or `AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS`;
+precedence is SDK option, environment variable, then default. Both
+`summarizeCaseResults()` and `summarizeCaseResultsStructured()` use this setting. It is
+validated only when either aggregate method is called, using the same positive-safe-integer
+and decimal-environment-value rules as the case budget. Step verification, individual case
+analysis, and legacy `summarizeResults()` budgets are unchanged.
+
+```typescript
+const llm = new LLMClient({
+  caseAnalysisMaxTokens: 4000,
+  aggregateAnalysisMaxTokens: 16000,
+});
+```
+
+The configured budget must be supported by the selected Azure deployment. It can include
+reasoning tokens for reasoning models; 8,000 is a default, not a guarantee against truncation.
+AutoTest does not automatically increase the budget or retry the aggregate request.
+
+If aggregate analysis is disabled, unconfigured, or fails (including invalid configuration,
+truncated, or malformed responses), the TL;DR explicitly reports that it is unavailable.
+The report still renders saved per-case RCA and pass audits without another model call:
+failure diagnoses and audit warnings are expanded as a fallback, without guessing
+cross-case groups. Coverage and individual analysis errors remain visible. Model assessments
+and confidence are labeled as opinions, and suspected false passes do not change verdicts.
+
+The case-mode results table identifies platforms and links to the corresponding saved
+analysis. Case details include the model's hypothesis, cited evidence, recorded diagnostic
+snapshots, direct/cascading step mappings, confirming actions, and evidence gaps. Diagnostic
+snapshots are folded after the hypotheses and confirming actions. Original failure/crash
+reasons are retained in a folded section without the 150-character cut;
+HTML and terminal control characters are escaped or removed for safe display. This does
+not change stored case results or command exit behavior.
 
 Legacy and evidence-only report layouts are unchanged. SDK callers can use
 `LLMClient.summarizeCaseResultsStructured()` for an `AggregateAnalysis` containing `tldr`
@@ -261,6 +299,7 @@ export AZURE_OPENAI_API_KEY=<key>
 export AZURE_OPENAI_DEPLOYMENT=gpt-4.1       # Optional, default: gpt-4.1
 export AZURE_OPENAI_API_VERSION=2024-12-01-preview
 export AUTOTEST_CASE_ANALYSIS_MAX_TOKENS=4000 # Optional, default: 4000
+export AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS=8000 # Optional, case-aggregate default: 8000
 ```
 
 - If Azure OpenAI is not configured, `case` mode still writes evidence and records
