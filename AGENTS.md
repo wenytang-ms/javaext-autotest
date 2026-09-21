@@ -443,6 +443,17 @@ AUTOTEST_AGGREGATE_ANALYSIS_MAX_TOKENS=8000
 - `case` analyzes every case: successful cases for false-pass risk and failed cases for
   evidence-based root cause. It does not change the case verdict.
 - `evidence-only` captures the bundle without LLM calls.
+- Evidence modes retain bounded, redacted per-check `verification` observations and
+  timestamped `screenshots` on every step/attempt, including successful checks. They add
+  a `_verified.png` image after deterministic checks; the original `_after.png` remains
+  the action-time image. Do not assume a later image still shows a transient completion
+  popup that the verifier has already read and dismissed.
+- Missing assertions are `not-configured`, checks blocked by fail-fast are `not-run`,
+  and evidence/model collection failures are recorded under `collectionErrors`.
+  These fields do not strengthen assertions or change retry/verdict policy.
+- Failed attempts use distinct diagnostics artifacts. Follow `evidence.artifactPath` and
+  manifest `stepId`/`attempt` metadata; never pair retry screenshots by the first filename
+  match or overwrite an earlier attempt's evidence.
 - `run-all` and `analyze` in `case` mode render AI Analysis — TL;DR first, then the
   results table, then evidence-backed detailed analysis and coverage. One aggregate
   request supplies both AI sections. If it is unavailable, show saved case RCA/audits

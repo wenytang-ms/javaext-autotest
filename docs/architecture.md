@@ -105,8 +105,11 @@ For each step, `TestRunner` performs this sequence:
 2. Capture the before screenshot.
 3. Call `ActionResolver.resolve(step.action)`.
 4. Capture the after screenshot, or an error screenshot if execution fails.
-5. Call `StepVerifier.verify(step)`.
-6. Optionally run the existing LLM screenshot re-check for a deterministic pass.
+5. Call `StepVerifier.verify(step)`, optionally recording each check's expected and observed
+   values while it executes. Fail-fast leaves subsequent checks explicitly `not-run`.
+6. In evidence modes, capture an additional `verified` screenshot after deterministic
+   verification completes. Optionally run the existing LLM screenshot re-check for a
+   deterministic pass, supplying both action-time and verified-time evidence in `case` mode.
 7. In `case` or `evidence-only` mode, capture failure diagnostics and attempt metadata.
 8. Append a structured result to `results.json`.
 
@@ -120,6 +123,37 @@ After all steps, the runner follows the selected analysis mode:
 
 Case-level analysis is advisory and never changes step status, case verdict, or exit code.
 LLM/API errors are recorded under the optional `analysis.error` field.
+
+### Step and attempt evidence
+
+`verification`, `screenshots`, and `collectionErrors` are additive fields on step results
+and attempts in evidence modes only. The default `legacy` mode keeps its original
+screenshot timing, model input, report shape, and parse-error fallback.
+
+`StepVerifier` can fill an optional `VerificationEvidence` object without changing its
+return contract. It records observations at the original driver read, including the final
+poll and values retained before completion-popup cleanup. Text/array bounds are explicit.
+Per-check failure and exception reasons are redacted and bounded to 4,096 characters;
+`reasonTruncated` distinguishes a bounded excerpt from the full reason. The original
+verifier return value and thrown error are unchanged.
+File assertions use the same content for matching, excerpt, and hash in evidence modes.
+Missing structured assertions are distinguished from passing assertions without changing
+the historical step verdict. Driver-helper booleans are not expanded into fabricated raw
+observations, and no assertion is added or strengthened by evidence collection.
+
+`TestRunner` redacts new evidence, step/attempt reasons, and stored model reasoning and
+suggestions in evidence modes before persistence. Artifact references remain intact.
+Screenshot capture and malformed model-response errors remain visible without
+changing the deterministic verdict. The post-verification screenshot is a later observation,
+not an atomic snapshot of every prior check; completion and other checks can change the UI.
+
+`EvidenceCollector` gives each failed attempt a distinct diagnostics artifact. The
+manifest maps persisted artifact references to exact `stepId`, `attempt`, and screenshot
+`phase` metadata. Case screenshot selection uses those references and preserves the first
+failed attempt and that same step's final attempt, even when subsequent steps run.
+Those images and the overall final state take precedence over intermediate sub-screenshots
+within the four-image budget. Collection errors from all attempts
+survive in the manifest, rather than only those on the final result.
 
 ## Driver design
 
@@ -286,6 +320,7 @@ test-results/<plan-name>/
 ├── screenshots/
 │   ├── 01_step-id_before.png
 │   ├── 01_step-id_after.png
+│   ├── 03_step-id_verified.png # evidence modes only
 │   └── 02_step-id_error.png
 ├── evidence/
 │   ├── manifest.json

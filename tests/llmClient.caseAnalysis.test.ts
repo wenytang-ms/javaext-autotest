@@ -117,6 +117,104 @@ function mockCompletion(content: string, finishReason = "stop") {
 }
 
 describe("LLMClient case and matrix analysis", () => {
+  it("includes deterministic observations and a separately labeled post-verification screenshot", async () => {
+    const fetchMock = mockCompletion(JSON.stringify({
+      passed: true, reasoning: "The polled state is ready", confidence: 0.9,
+    }));
+    const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+    await client.verifyStep("before", "loading", "wait", "Ready", {
+      verification: {
+        status: "pass",
+        checks: [{
+          verifier: "verifyTerminal", expected: { contains: "Ready" }, status: "pass",
+          actual: { text: "Ready api-key=observation-secret" },
+        }],
+      },
+      afterVerificationBase64: "ready",
+    });
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const prompt = JSON.stringify(body.messages);
+    expect(prompt).toContain("POST-VERIFICATION");
+    expect(prompt).toContain("verifyTerminal");
+    expect(prompt).toContain("dismisses the popup");
+    expect(body.messages[0].content).toContain("An intermediate loading state in AFTER is not a failure");
+    expect(prompt).toContain("data:image/png;base64,loading");
+    expect(prompt).toContain("data:image/png;base64,ready");
+    expect(prompt).not.toContain("observation-secret");
+  });
+
+  it.each(["not JSON", "{}", '{"passed":true,"reasoning":"ready","confidence":2}'])(
+    "rejects unavailable or malformed evidence-mode verification instead of returning success: %s",
+    async (content) => {
+      mockCompletion(content);
+      const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+      await expect(client.verifyStep("before", "after", "wait", "Ready", {
+        verification: { status: "not-configured", checks: [] },
+      })).rejects.toThrow();
+    },
+  );
+
+  it("keeps the legacy verification parse-error fallback", async () => {
+    mockCompletion("not JSON");
+    const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+    await expect(client.verifyStep("before", "after", "wait", "Ready"))
+      .resolves.toMatchObject({ passed: true, confidence: 0 });
+  });
+
+  it.each([null, false, 42, {}, []])("rejects a non-string evidence-mode suggestion: %j", async (suggestion) => {
+    mockCompletion(JSON.stringify({ passed: false, reasoning: "Not ready", confidence: 0.9, suggestion }));
+    const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+    await expect(client.verifyStep("before", "after", "wait", "Ready", {
+      verification: { status: "pass", checks: [] },
+    })).rejects.toThrow("Invalid LLM verification response");
+  });
+
+  it.each([undefined, "", "Wait for the project to load"])(
+    "accepts absent or string evidence-mode suggestions: %s",
+    async (suggestion) => {
+      mockCompletion(JSON.stringify({ passed: false, reasoning: "Not ready", confidence: 0.9, suggestion }));
+      const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+      await expect(client.verifyStep("before", "after", "wait", "Ready", {
+        verification: { status: "pass", checks: [] },
+      })).resolves.toEqual({ passed: false, reasoning: "Not ready", confidence: 0.9, suggestion });
+    },
+  );
+
+  it("does not add suggestion validation to legacy responses", async () => {
+    mockCompletion(JSON.stringify({ passed: true, reasoning: "Ready", confidence: 0.9, suggestion: 42 }));
+    const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+    await expect(client.verifyStep("before", "after", "wait", "Ready"))
+      .resolves.toMatchObject({ passed: true, suggestion: 42 });
+  });
+
+  it("forwards successful-check observations and attempt references to case analysis", async () => {
+    const fetchMock = mockCompletion("invalid case analysis");
+    const input = report("pass");
+    input.results[0]!.verification = {
+      status: "pass",
+      checks: [{
+        verifier: "verifyProblems", expected: { errors: 0 }, status: "pass",
+        actual: { errors: 0, warnings: 1 },
+      }],
+    };
+    input.results[0]!.screenshots = [{
+      path: "screenshots/03_ls-ready_verified.png", phase: "verified",
+      capturedAt: "2026-09-12T10:00:00.000Z",
+    }];
+    input.results[0]!.attempts = [{
+      attempt: 1, status: "pass", duration: 1_000,
+      verification: input.results[0]!.verification,
+      screenshots: input.results[0]!.screenshots,
+    }];
+    const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+    await expect(client.analyzeCase({ plan, report: input })).rejects.toThrow();
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const prompt = body.messages[1].content[0].text;
+    expect(prompt).toContain("verifyProblems");
+    expect(prompt).toContain("03_ls-ready_verified.png");
+    expect(prompt).toContain('"attempt": 1');
+  });
+
   it("sends the full scenario, execution evidence, logs, versions, and screenshots for failure RCA", async () => {
     const expected: CaseAnalysis = {
       schemaVersion: 1,

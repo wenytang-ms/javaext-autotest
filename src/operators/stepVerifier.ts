@@ -6,14 +6,20 @@
  */
 
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import type { VscodeDriver } from "../drivers/vscodeDriver.js";
-import type { TestStep } from "../types.js";
+import type {
+  TestStep, VerificationActual, VerificationCheck, VerificationEvidence, VerifierKind,
+} from "../types.js";
 import {
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_TREE_ITEM_TIMEOUT_S,
   PROBLEMS_POLL_INTERVAL_MS,
 } from "./defaults.js";
 import { computeDeadline, pollUntil, type VerifyResult } from "./verifierUtils.js";
+import { sanitizeEvidence } from "./evidenceCollector.js";
+
+type Observe = (actual: VerificationActual) => void;
 
 export class StepVerifier {
   private driver: VscodeDriver;
@@ -24,70 +30,97 @@ export class StepVerifier {
 
   /**
    * Verify a step against all its verification criteria.
-   * Runs deterministic checks first, then LLM verification if needed.
-   *
-   * @param screenshotPath — path to the after-action screenshot (for LLM verify)
+   * Optional evidence records the values used by each check, without re-reading UI.
    */
   async verify(
     step: TestStep,
+    evidence?: VerificationEvidence,
   ): Promise<{ passed: boolean; reason?: string }> {
-    // If no deterministic verification defined, auto-pass
-    if (!step.verifyFile && !step.verifyNotification
-        && !step.verifyEditor && !step.verifyProblems && !step.verifyCompletion
-        && !step.verifyQuickInput && !step.verifyDialog
-        && !step.verifyTreeItem && !step.verifyEditorTab
-        && !step.verifyWebview && !step.verifyOutputChannel && !step.verifyTerminal
-        && !step.verifyClipboard) {
-      return { passed: true };
+    const verifiers: Array<[VerifierKind, (observe?: Observe) => Promise<VerifyResult | null>]> = [
+      ["verifyFile", (observe) => this.verifyFile(step, observe)],
+      ["verifyNotification", (observe) => this.verifyNotification(step, observe)],
+      ["verifyEditor", (observe) => this.verifyEditor(step, observe)],
+      ["verifyProblems", (observe) => this.verifyProblems(step, observe)],
+      ["verifyCompletion", (observe) => this.verifyCompletion(step, observe)],
+      ["verifyQuickInput", (observe) => this.verifyQuickInput(step, observe)],
+      ["verifyDialog", (observe) => this.verifyDialogCheck(step, observe)],
+      ["verifyTreeItem", (observe) => this.verifyTreeItemCheck(step, observe)],
+      ["verifyEditorTab", (observe) => this.verifyEditorTabCheck(step, observe)],
+      ["verifyWebview", (observe) => this.verifyWebviewCheck(step, observe)],
+      ["verifyOutputChannel", (observe) => this.verifyOutputChannelCheck(step, observe)],
+      ["verifyTerminal", (observe) => this.verifyTerminalCheck(step, observe)],
+      ["verifyClipboard", (observe) => this.verifyClipboardCheck(step, observe)],
+    ];
+    if (evidence) {
+      evidence.status = "not-configured";
+      evidence.checks = verifiers.flatMap(([verifier]) => {
+        const expected = step[verifier];
+        return expected ? [{ verifier, expected, status: "not-run" as const }] : [];
+      });
     }
 
-    // ── Deterministic verifications (run all, fail fast) ──
-
-    const fileResult = await this.verifyFile(step);
-    if (fileResult && !fileResult.passed) return fileResult;
-
-    const notifResult = await this.verifyNotification(step);
-    if (notifResult && !notifResult.passed) return notifResult;
-
-    const editorResult = await this.verifyEditor(step);
-    if (editorResult && !editorResult.passed) return editorResult;
-
-    const problemsResult = await this.verifyProblems(step);
-    if (problemsResult && !problemsResult.passed) return problemsResult;
-
-    const completionResult = await this.verifyCompletion(step);
-    if (completionResult && !completionResult.passed) return completionResult;
-
-    const quickInputResult = await this.verifyQuickInput(step);
-    if (quickInputResult && !quickInputResult.passed) return quickInputResult;
-
-    const dialogResult = await this.verifyDialogCheck(step);
-    if (dialogResult && !dialogResult.passed) return dialogResult;
-
-    const treeItemResult = await this.verifyTreeItemCheck(step);
-    if (treeItemResult && !treeItemResult.passed) return treeItemResult;
-
-    const editorTabResult = await this.verifyEditorTabCheck(step);
-    if (editorTabResult && !editorTabResult.passed) return editorTabResult;
-
-    const webviewResult = await this.verifyWebviewCheck(step);
-    if (webviewResult && !webviewResult.passed) return webviewResult;
-
-    const outputChannelResult = await this.verifyOutputChannelCheck(step);
-    if (outputChannelResult && !outputChannelResult.passed) return outputChannelResult;
-
-    const terminalResult = await this.verifyTerminalCheck(step);
-    if (terminalResult && !terminalResult.passed) return terminalResult;
-
-    const clipboardResult = await this.verifyClipboardCheck(step);
-    if (clipboardResult && !clipboardResult.passed) return clipboardResult;
-
+    for (const [kind, verify] of verifiers) {
+      const check = evidence?.checks.find((entry) => entry.verifier === kind);
+      if (check) check.startedAt = new Date().toISOString();
+      try {
+        const result = await verify(check ? (actual) => this.observe(check, actual) : undefined);
+        if (check) {
+          check.completedAt = new Date().toISOString();
+          check.status = result ? (result.passed ? "pass" : "fail") : "skipped";
+          if (result?.reason) this.recordReason(check, result.reason);
+          if (result && evidence) evidence.status = result.passed ? "pass" : "fail";
+        }
+        if (result && !result.passed) return result;
+      } catch (e) {
+        if (check && evidence) {
+          check.completedAt = new Date().toISOString();
+          check.status = "error";
+          this.recordReason(check, (e as Error).message);
+          evidence.status = "error";
+        }
+        throw e;
+      }
+    }
     return { passed: true };
+  }
+
+  private recordReason(check: VerificationCheck, reason: string): void {
+    const redacted = sanitizeEvidence(reason);
+    check.reason = redacted.slice(0, 4096);
+    if (redacted.length > 4096) check.reasonTruncated = true;
+  }
+
+  private observe(check: VerificationCheck, actual: VerificationActual): void {
+    const bounded: VerificationActual = {};
+    const truncated = new Set(check.truncated);
+    for (const [key, value] of Object.entries(actual)) {
+      if (typeof value === "string") {
+        bounded[key] = value.slice(0, 4096);
+        if (value.length > 4096) truncated.add(key);
+        else truncated.delete(key);
+      } else if (Array.isArray(value)) {
+        const entries: string[] = [];
+        let remaining = 4096;
+        for (const entry of value.slice(0, 100)) {
+          if (remaining === 0) break;
+          entries.push(entry.slice(0, remaining));
+          remaining -= entries.at(-1)!.length;
+        }
+        bounded[key] = entries;
+        if (entries.length !== value.length || entries.some((entry, index) => entry !== value[index])) truncated.add(key);
+        else truncated.delete(key);
+      } else {
+        bounded[key] = value;
+      }
+    }
+    check.actual = { ...check.actual, ...bounded };
+    check.observedAt = new Date().toISOString();
+    check.truncated = truncated.size ? [...truncated] : undefined;
   }
 
   // ─── Deterministic Verifiers ─────────────────────────────
 
-  private async verifyFile(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyFile(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyFile) return null;
 
     // Support workspace-relative paths with "~/" prefix and workspace placeholders.
@@ -101,17 +134,34 @@ export class StepVerifier {
       return { passed: false, reason: "No workspace path available for workspace-relative path" };
     }
     const filePath = path.resolve(this.driver.resolveWorkspacePlaceholders(rawPath) as string);
+    const exists = await this.driver.fileExists(filePath);
+    observe?.({ path: filePath, exists });
     if (step.verifyFile.exists === false) {
-      const exists = await this.driver.fileExists(filePath);
       if (exists) return { passed: false, reason: `File should not exist: ${filePath}` };
     } else {
-      if (!await this.driver.fileExists(filePath)) {
+      if (!exists) {
         return { passed: false, reason: `File not found: ${filePath}` };
       }
+      // Evidence mode uses the same read for the verdict, excerpt, and content hash.
+      const observedContent = observe && (step.verifyFile.contains || step.verifyFile.matches)
+        ? await this.driver.readFile(filePath)
+        : undefined;
+      if (observedContent !== undefined) {
+        observe?.({
+          content: observedContent,
+          contentLength: observedContent.length,
+          sha256: createHash("sha256").update(observedContent).digest("hex"),
+        });
+      }
       if (step.verifyFile.contains) {
-        const contains = await this.driver.fileContains(filePath, step.verifyFile.contains);
+        const contains = observedContent === undefined
+          ? await this.driver.fileContains(filePath, step.verifyFile.contains)
+          : observedContent.includes(step.verifyFile.contains);
+        observe?.({ containsMatched: contains });
         if (!contains) {
-          const snippet = await this.readFileSnippet(filePath);
+          const snippet = observedContent === undefined
+            ? await this.readFileSnippet(filePath)
+            : observedContent.slice(0, 2048);
           return {
             passed: false,
             reason: `File does not contain: "${step.verifyFile.contains}"\n--- file (${filePath}) ---\n${snippet}\n--- end ---`,
@@ -119,15 +169,19 @@ export class StepVerifier {
         }
       }
       if (step.verifyFile.matches) {
-        const content = await this.driver.readFile(filePath);
+        const content = observedContent ?? await this.driver.readFile(filePath);
         let re: RegExp;
         try {
           re = new RegExp(step.verifyFile.matches);
         } catch (e) {
           return { passed: false, reason: `Invalid regex in verifyFile.matches: "${step.verifyFile.matches}" — ${(e as Error).message}` };
         }
-        if (!re.test(content)) {
-          const snippet = await this.readFileSnippet(filePath);
+        const matches = re.test(content);
+        observe?.({ regexMatched: matches });
+        if (!matches) {
+          const snippet = observedContent === undefined
+            ? await this.readFileSnippet(filePath)
+            : observedContent.slice(0, 2048);
           return {
             passed: false,
             reason: `File does not match regex: /${step.verifyFile.matches}/\n--- file (${filePath}) ---\n${snippet}\n--- end ---`,
@@ -149,10 +203,11 @@ export class StepVerifier {
     }
   }
 
-  private async verifyNotification(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyNotification(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyNotification) return null;
 
     const notifications = await this.driver.getNotifications();
+    observe?.({ notifications });
     const found = notifications.some((n) => n.includes(step.verifyNotification!));
     if (!found) {
       return {
@@ -163,10 +218,11 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyEditor(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyEditor(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyEditor?.contains) return null;
 
     const found = await this.driver.editorContains(step.verifyEditor.contains);
+    observe?.({ containsMatched: found });
     if (!found) {
       return {
         passed: false,
@@ -176,7 +232,7 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyProblems(step: TestStep): Promise<VerifyResult | null> {
+  private async verifyProblems(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyProblems) return null;
 
     const expected = step.verifyProblems;
@@ -189,6 +245,7 @@ export class StepVerifier {
       waitFn: (s) => this.driver.wait(s),
       check: async () => {
         lastCounts = await this.driver.getProblemsCount();
+        observe?.({ ...lastCounts });
         // -1 means status bar not ready yet — keep polling
         if (lastCounts.errors === -1) return { done: false };
         if (matches(lastCounts.errors, expected.errors) && matches(lastCounts.warnings, expected.warnings)) {
@@ -211,7 +268,7 @@ export class StepVerifier {
     });
   }
 
-  private async verifyCompletion(step: TestStep): Promise<VerifyResult | null> {
+  private async verifyCompletion(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyCompletion) return null;
 
     const vc = step.verifyCompletion;
@@ -232,6 +289,7 @@ export class StepVerifier {
       }
 
       lastItems = await this.driver.readCompletionItems();
+      observe?.({ items: lastItems });
 
       if (vc.notEmpty && lastItems.length === 0) {
         await this.driver.wait(pollIntervalSeconds);
@@ -248,6 +306,7 @@ export class StepVerifier {
       await this.driver.wait(1);
       const settledItems = await this.driver.readCompletionItems();
       if (settledItems.length > 0) lastItems = settledItems;
+      observe?.({ items: lastItems });
 
       const excludeFailure = this.findExcludeFailure(lastItems, vc.excludes);
       await this.driver.dismissCompletion();
@@ -262,6 +321,7 @@ export class StepVerifier {
     } else {
       lastItems = await this.driver.readCompletionItems();
     }
+    observe?.({ items: lastItems });
     await this.driver.dismissCompletion();
 
     if (vc.notEmpty && lastItems.length === 0) {
@@ -305,11 +365,12 @@ export class StepVerifier {
     return `[${head}${items.length > limit ? "..." : ""}]`;
   }
 
-  private async verifyQuickInput(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyQuickInput(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyQuickInput) return null;
     const qi = step.verifyQuickInput;
 
     const message = await this.driver.getQuickInputValidationMessage();
+    observe?.({ message });
     console.log(`   🔍 Quick input validation message: "${message}"`);
 
     if (qi.noError) {
@@ -333,11 +394,12 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyDialogCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyDialogCheck(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyDialog) return null;
 
     const expectVisible = step.verifyDialog.visible !== false; // default true
     const isVisible = await this.driver.isDialogVisible();
+    observe?.({ visible: isVisible });
 
     if (expectVisible && !isVisible) {
       return { passed: false, reason: "Expected a modal dialog to be visible, but none found" };
@@ -348,6 +410,7 @@ export class StepVerifier {
 
     if (expectVisible && step.verifyDialog.contains) {
       const message = await this.driver.getDialogMessage();
+      observe?.({ message });
       if (!message.toLowerCase().includes(step.verifyDialog.contains.toLowerCase())) {
         return {
           passed: false,
@@ -359,7 +422,7 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyTreeItemCheck(step: TestStep): Promise<VerifyResult | null> {
+  private async verifyTreeItemCheck(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyTreeItem) return null;
 
     const expectVisible = step.verifyTreeItem.visible !== false; // default true
@@ -383,6 +446,7 @@ export class StepVerifier {
         step.verifyTreeItem.inView,
         level,
       );
+      observe?.({ countConditionMet: matched });
       if (!matched) {
         return {
           passed: false,
@@ -403,6 +467,7 @@ export class StepVerifier {
       const found = await this.driver.waitForTreeItem(
         step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView, level,
       );
+      observe?.({ appeared: found });
       if (!found) {
         return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not appear within ${timeoutMs / 1000}s${step.verifyTreeItem.inView ? ` in view "${step.verifyTreeItem.inView}"` : ""}` };
       }
@@ -410,6 +475,7 @@ export class StepVerifier {
       const gone = await this.driver.waitForTreeItemGone(
         step.verifyTreeItem.name, timeoutMs, exact, step.verifyTreeItem.inView, level,
       );
+      observe?.({ disappeared: gone });
       if (!gone) {
         return { passed: false, reason: `Tree item "${step.verifyTreeItem.name}" did not disappear within ${timeoutMs / 1000}s${step.verifyTreeItem.inView ? ` in view "${step.verifyTreeItem.inView}"` : ""}` };
       }
@@ -417,18 +483,19 @@ export class StepVerifier {
     return { passed: true };
   }
 
-  private async verifyEditorTabCheck(step: TestStep): Promise<VerifyResult | null> {
+  private async verifyEditorTabCheck(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyEditorTab) return null;
 
     const timeoutMs = (step.timeout ?? DEFAULT_TREE_ITEM_TIMEOUT_S) * 1000;
     const found = await this.driver.waitForEditorTab(step.verifyEditorTab.title, timeoutMs);
+    observe?.({ appeared: found });
     if (!found) {
       return { passed: false, reason: `Editor tab "${step.verifyEditorTab.title}" did not appear within ${timeoutMs / 1000}s` };
     }
     return { passed: true };
   }
 
-  private async verifyWebviewCheck(step: TestStep): Promise<VerifyResult | null> {
+  private async verifyWebviewCheck(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyWebview) return null;
 
     let text = "";
@@ -436,6 +503,7 @@ export class StepVerifier {
       waitFn: (s) => this.driver.wait(s),
       check: async () => {
         text = await this.driver.getWebviewText();
+        observe?.({ text });
         const containsOk = this.asArray(step.verifyWebview?.contains).every((expected) => text.includes(expected));
         const notContainsOk = this.asArray(step.verifyWebview?.notContains).every((unexpected) => !text.includes(unexpected));
         if (containsOk && notContainsOk) return { done: true, result: { passed: true } };
@@ -455,7 +523,7 @@ export class StepVerifier {
     });
   }
 
-  private async verifyOutputChannelCheck(step: TestStep): Promise<{ passed: boolean; reason?: string } | null> {
+  private async verifyOutputChannelCheck(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyOutputChannel) return null;
 
     const { channel, contains, notContains } = step.verifyOutputChannel;
@@ -465,6 +533,7 @@ export class StepVerifier {
       waitFn: (s) => this.driver.wait(s),
       check: async () => {
         text = await this.driver.getOutputChannelText(channel);
+        observe?.({ channel, text });
         if (notContains && text.includes(notContains)) {
           return {
             done: true,
@@ -486,7 +555,7 @@ export class StepVerifier {
     });
   }
 
-  private async verifyTerminalCheck(step: TestStep): Promise<VerifyResult | null> {
+  private async verifyTerminalCheck(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyTerminal) return null;
 
     const { contains, notContains } = step.verifyTerminal;
@@ -496,6 +565,7 @@ export class StepVerifier {
       waitFn: (s) => this.driver.wait(s),
       check: async () => {
         text = await this.driver.getTerminalText();
+        observe?.({ text });
         const containsOk = !contains || text.includes(contains);
         const notContainsOk = !notContains || !text.includes(notContains);
         if (containsOk && notContainsOk) return { done: true, result: { passed: true } };
@@ -513,7 +583,7 @@ export class StepVerifier {
     });
   }
 
-  private async verifyClipboardCheck(step: TestStep): Promise<VerifyResult | null> {
+  private async verifyClipboardCheck(step: TestStep, observe?: Observe): Promise<VerifyResult | null> {
     if (!step.verifyClipboard) return null;
 
     const { exact, contains, notContains, matches, notEmpty } = step.verifyClipboard;
@@ -533,6 +603,7 @@ export class StepVerifier {
       waitFn: (s) => this.driver.wait(s),
       check: async () => {
         text = await this.driver.readClipboard();
+        observe?.({ text });
 
         const exactOk = exact === undefined || text === exact;
         const containsOk = contains === undefined || text.includes(contains);
