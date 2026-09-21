@@ -15,10 +15,12 @@ afterEach(() => {
   }
 });
 
-function createRunner(step: TestStep, mode: AnalysisMode = "evidence-only") {
+function createRunner(step: TestStep | TestStep[], mode: AnalysisMode = "evidence-only") {
   const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), "autotest-runner-evidence-"));
   temporaryDirectories.push(outputDir);
-  const plan: TestPlan = { name: "Evidence regression", setup: { extension: "" }, steps: [step] };
+  const plan: TestPlan = {
+    name: "Evidence regression", setup: { extension: "" }, steps: Array.isArray(step) ? step : [step],
+  };
   const runner = new TestRunner(plan, { outputDir, analysisMode: mode, noLLM: true });
   const driver = runner["driver"];
   vi.spyOn(driver, "launch").mockResolvedValue();
@@ -50,6 +52,72 @@ function configureLlm(runner: TestRunner) {
 }
 
 describe("TestRunner evidence chain", () => {
+  it.each(["case", "evidence-only"] as const)(
+    "redacts failed and exceptional step/attempt reasons before persistence in %s mode",
+    async (mode) => {
+      for (const stage of ["failure", "action-error", "verifier-error"] as const) {
+        const { runner, driver, outputDir } = createRunner({
+          id: "redaction", action: "wait", retries: 1, verifyNotification: "Ready",
+        }, mode);
+        const secretText = `api-key=fake-${stage}-secret`;
+        const notifications = vi.spyOn(driver, "getNotifications").mockResolvedValue([secretText]);
+        if (stage === "action-error") {
+          vi.mocked(runner["actionResolver"].resolve).mockRejectedValue(new Error(secretText));
+        } else if (stage === "verifier-error") {
+          notifications.mockRejectedValue(new Error(secretText));
+        }
+
+        const report = await runner.run();
+        const result = report.results[0]!;
+        expect(result.status).toBe(stage === "failure" ? "fail" : "error");
+        expect(result.reason).toContain("api-key=<redacted>");
+        expect(result.attempts).toHaveLength(2);
+        for (const attempt of result.attempts!) {
+          expect(attempt.reason).toContain("api-key=<redacted>");
+          expect(fs.existsSync(attempt.screenshot!)).toBe(true);
+        }
+        for (const file of ["results.json", path.join("evidence", "execution.json")]) {
+          const persisted = fs.readFileSync(path.join(outputDir, file), "utf8");
+          expect(persisted).not.toContain(`fake-${stage}-secret`);
+          expect(persisted).toContain("api-key=<redacted>");
+        }
+      }
+    },
+  );
+
+  it("redacts model reasoning and suggestions as well as the composed failure reason", async () => {
+    const { runner, outputDir } = createRunner({
+      id: "model-redaction", action: "wait", verify: "Ready", verifyProblems: { errors: 0 },
+    });
+    vi.spyOn(configureLlm(runner), "verifyStep").mockResolvedValue({
+      passed: false, confidence: 1,
+      reasoning: "api-key=fake-model-reason",
+      suggestion: "access-token=fake-model-suggestion",
+    });
+    const report = await runner.run();
+    expect(report.results[0]?.status).toBe("fail");
+    expect(report.results[0]?.llmVerification).toMatchObject({
+      reasoning: "api-key=<redacted>", suggestion: "access-token=<redacted>",
+    });
+    const persisted = fs.readFileSync(path.join(outputDir, "results.json"), "utf8");
+    expect(persisted).not.toContain("fake-model-reason");
+    expect(persisted).not.toContain("fake-model-suggestion");
+  });
+
+  it.each(["failure", "action-error"] as const)("preserves legacy %s reason text", async (stage) => {
+    const { runner, driver } = createRunner({
+      id: "legacy-reason", action: "wait", verifyNotification: "Ready",
+    }, "legacy");
+    const text = "api-key=fake-legacy-sentinel";
+    vi.spyOn(driver, "getNotifications").mockResolvedValue([text]);
+    if (stage === "action-error") {
+      vi.mocked(runner["actionResolver"].resolve).mockRejectedValue(new Error(text));
+    }
+    const report = await runner.run();
+    expect(report.results[0]?.reason).toContain(text);
+    expect(report.results[0]?.verification).toBeUndefined();
+  });
+
   it("retains action-time screenshots and supplies verified state and observations to the step LLM", async () => {
     const { runner, driver, outputDir } = createRunner({
       id: "settle", action: "wait", verify: "Problems contains no errors",
@@ -157,6 +225,36 @@ describe("TestRunner evidence chain", () => {
     const contents = paths.map((file) => JSON.parse(fs.readFileSync(path.join(outputDir, file), "utf8")));
     expect(contents.map((entry) => entry.problemCounts.errors)).toEqual([1, 2]);
   });
+
+  it.each([false, true])(
+    "keeps a failed step's recovery image when later steps run (sub-screenshot: %s)",
+    async (withSubScreenshot) => {
+      const { runner, driver } = createRunner([{
+        id: "retry", action: "wait", retries: 1, verifyNotification: "Ready",
+      }, {
+        id: "later", action: "wait",
+      }]);
+      vi.spyOn(driver, "getNotifications")
+        .mockResolvedValueOnce(["Loading"])
+        .mockResolvedValueOnce(["Ready"]);
+      if (withSubScreenshot) {
+        vi.mocked(runner["actionResolver"].resolve).mockImplementation(async () => {
+          await driver.subScreenshot("menu");
+          return true;
+        });
+      }
+
+      const report = await runner.run();
+      const attempts = report.results[0]!.attempts!;
+      const selected = runner["collectCaseScreenshots"](report.results).map((entry) => entry.label);
+      const before = attempts[0]!.screenshots!.find((entry) => entry.phase === "before")!;
+      const failed = attempts[0]!.screenshots!.find((entry) => entry.phase === "verified")!;
+      const recovered = attempts[1]!.screenshots!.find((entry) => entry.phase === "verified")!;
+      const final = report.results[1]!.screenshots!.find((entry) => entry.phase === "verified")!;
+      expect(selected).toEqual([before, failed, recovered, final].map((entry) => path.basename(entry.path)));
+      expect(selected).toHaveLength(4);
+    },
+  );
 
   it("records screenshot and model failures without changing the deterministic verdict", async () => {
     const { runner, driver, outputDir } = createRunner({

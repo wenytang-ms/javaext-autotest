@@ -429,6 +429,7 @@ it. Missing or truncated evidence is a limitation, not proof of success or failu
         || !Number.isFinite(result.confidence)
         || result.confidence < 0
         || result.confidence > 1
+        || (result.suggestion !== undefined && typeof result.suggestion !== "string")
       )) {
         throw new Error("Invalid LLM verification response");
       }

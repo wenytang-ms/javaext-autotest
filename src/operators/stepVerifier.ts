@@ -17,6 +17,7 @@ import {
   PROBLEMS_POLL_INTERVAL_MS,
 } from "./defaults.js";
 import { computeDeadline, pollUntil, type VerifyResult } from "./verifierUtils.js";
+import { sanitizeEvidence } from "./evidenceCollector.js";
 
 type Observe = (actual: VerificationActual) => void;
 
@@ -66,7 +67,7 @@ export class StepVerifier {
         if (check) {
           check.completedAt = new Date().toISOString();
           check.status = result ? (result.passed ? "pass" : "fail") : "skipped";
-          if (result?.reason) check.reason = result.reason;
+          if (result?.reason) this.recordReason(check, result.reason);
           if (result && evidence) evidence.status = result.passed ? "pass" : "fail";
         }
         if (result && !result.passed) return result;
@@ -74,13 +75,19 @@ export class StepVerifier {
         if (check && evidence) {
           check.completedAt = new Date().toISOString();
           check.status = "error";
-          check.reason = (e as Error).message;
+          this.recordReason(check, (e as Error).message);
           evidence.status = "error";
         }
         throw e;
       }
     }
     return { passed: true };
+  }
+
+  private recordReason(check: VerificationCheck, reason: string): void {
+    const redacted = sanitizeEvidence(reason);
+    check.reason = redacted.slice(0, 4096);
+    if (redacted.length > 4096) check.reasonTruncated = true;
   }
 
   private observe(check: VerificationCheck, actual: VerificationActual): void {

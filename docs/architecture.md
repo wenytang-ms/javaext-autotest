@@ -133,20 +133,26 @@ screenshot timing, model input, report shape, and parse-error fallback.
 `StepVerifier` can fill an optional `VerificationEvidence` object without changing its
 return contract. It records observations at the original driver read, including the final
 poll and values retained before completion-popup cleanup. Text/array bounds are explicit.
+Per-check failure and exception reasons are redacted and bounded to 4,096 characters;
+`reasonTruncated` distinguishes a bounded excerpt from the full reason. The original
+verifier return value and thrown error are unchanged.
 File assertions use the same content for matching, excerpt, and hash in evidence modes.
 Missing structured assertions are distinguished from passing assertions without changing
 the historical step verdict. Driver-helper booleans are not expanded into fabricated raw
 observations, and no assertion is added or strengthened by evidence collection.
 
-`TestRunner` redacts new evidence before persistence and supplies it to step and case
-analysis. Screenshot capture and malformed model-response errors remain visible without
+`TestRunner` redacts new evidence, step/attempt reasons, and stored model reasoning and
+suggestions in evidence modes before persistence. Artifact references remain intact.
+Screenshot capture and malformed model-response errors remain visible without
 changing the deterministic verdict. The post-verification screenshot is a later observation,
 not an atomic snapshot of every prior check; completion and other checks can change the UI.
 
 `EvidenceCollector` gives each failed attempt a distinct diagnostics artifact. The
 manifest maps persisted artifact references to exact `stepId`, `attempt`, and screenshot
 `phase` metadata. Case screenshot selection uses those references and preserves the first
-failed attempt even when a later attempt passes. Collection errors from all attempts
+failed attempt and that same step's final attempt, even when subsequent steps run.
+Those images and the overall final state take precedence over intermediate sub-screenshots
+within the four-image budget. Collection errors from all attempts
 survive in the manifest, rather than only those on the final result.
 
 ## Driver design

@@ -463,12 +463,12 @@ export class TestRunner {
         stepId: step.id,
         action: step.action,
         status,
-        reason,
+        reason: verification ? sanitizeEvidence(reason) : reason,
         duration: Date.now() - start,
         screenshot: afterPath,
         ...evidenceFields(),
         ...(this.analysisMode !== "legacy" && llmVerification
-          ? { llmVerification }
+          ? { llmVerification: sanitizeEvidence(llmVerification) }
           : {}),
         ...(evidence ? { evidence } : {}),
       };
@@ -482,7 +482,7 @@ export class TestRunner {
         stepId: step.id,
         action: step.action,
         status: "error",
-        reason: (e as Error).message,
+        reason: verification ? sanitizeEvidence((e as Error).message) : (e as Error).message,
         duration: Date.now() - start,
         screenshot: errorPath,
         ...evidenceFields(),
@@ -623,9 +623,11 @@ export class TestRunner {
   private collectCaseScreenshots(results: StepResult[]): CaseScreenshot[] {
     if (!this.screenshotDir || !fs.existsSync(this.screenshotDir)) return [];
 
+    const compareNames = (left: string, right: string) =>
+      parseInt(left, 10) - parseInt(right, 10) || left.localeCompare(right);
     const files = fs.readdirSync(this.screenshotDir)
       .filter((fileName) => fileName.endsWith(".png"))
-      .sort((left, right) => parseInt(left, 10) - parseInt(right, 10) || left.localeCompare(right));
+      .sort(compareNames);
     const selected = new Set<string>();
     const failing = results.filter((result) =>
       result.status === "fail" || result.status === "error"
@@ -645,9 +647,10 @@ export class TestRunner {
       }
     };
 
-    const recordedAttempts = results.flatMap<StepResult | StepAttemptResult>((result) =>
+    const attemptsByStep: Array<Array<StepResult | StepAttemptResult>> = results.map((result) =>
       result.attempts?.length ? result.attempts : [result]
     );
+    const recordedAttempts = attemptsByStep.flat();
     const addRecordedScreenshot = (
       entry: StepResult | StepAttemptResult | undefined,
       phases: StepScreenshot["phase"][],
@@ -661,19 +664,23 @@ export class TestRunner {
       }
     };
     if (recordedAttempts.some((entry) => entry.screenshots !== undefined)) {
-      const firstFailure = recordedAttempts.find((entry) =>
+      const firstFailingStep = attemptsByStep.find((attempts) =>
+        attempts.some((entry) => entry.status === "fail" || entry.status === "error")
+      );
+      const firstFailure = firstFailingStep?.find((entry) =>
         entry.status === "fail" || entry.status === "error"
       );
       if (firstFailure) {
         addRecordedScreenshot(firstFailure, ["before"]);
-        const sub = firstFailure.screenshots?.filter((entry) => entry.phase === "sub").at(-1);
-        if (sub) selected.add(path.basename(sub.path));
         addRecordedScreenshot(firstFailure, ["error", "verified", "after"]);
+        addRecordedScreenshot(firstFailingStep?.at(-1), ["error", "verified", "after"]);
       } else {
         addRecordedScreenshot(recordedAttempts[0], ["before"]);
         addRecordedScreenshot(recordedAttempts[Math.floor(recordedAttempts.length / 2)], ["verified", "after"]);
       }
       addRecordedScreenshot(recordedAttempts.at(-1), ["error", "verified", "after"]);
+      const sub = firstFailure?.screenshots?.filter((entry) => entry.phase === "sub").at(-1);
+      if (sub && selected.size < 4) selected.add(path.basename(sub.path));
     } else if (failing.length > 0) {
       addStepScreenshot(failing[0]!.stepId, ["before"]);
       const firstFailureSubScreenshot = files
@@ -693,7 +700,7 @@ export class TestRunner {
     }
 
     const screenshots: CaseScreenshot[] = [];
-    for (const fileName of [...selected].slice(0, 4)) {
+    for (const fileName of [...selected].slice(0, 4).sort(compareNames)) {
       try {
         screenshots.push({
           label: fileName,

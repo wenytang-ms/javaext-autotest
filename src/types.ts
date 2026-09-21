@@ -454,6 +454,7 @@ export interface VerificationCheck {
   /** Fields whose captured values were bounded, not the full observed values. */
   truncated?: string[];
   reason?: string;
+  reasonTruncated?: boolean;
 }
 
 export interface VerificationEvidence {

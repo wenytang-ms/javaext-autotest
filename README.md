@@ -198,8 +198,10 @@ In `case` and `evidence-only` modes, each step and retry attempt also records:
 Observations come from the checks themselves, not a second read of a potentially changed
 UI. File content assertions in evidence modes use one read for the verdict, excerpt, and
 SHA-256 hash. Text is limited to 4,096 characters and arrays to 100 entries / 4,096 total
-characters, with truncated
-fields explicitly marked; evidence is redacted before runner persistence or model input.
+characters, with truncated fields explicitly marked. Per-check failure and exception
+reasons are redacted and limited to 4,096 characters, with `reasonTruncated: true` when
+shortened. Evidence-mode step/attempt reasons and stored model reasoning/suggestions are
+also redacted before persistence; legacy reason text is unchanged.
 Driver helpers that return only a boolean record that boolean, not an invented count or
 full UI snapshot. Problems counts describe the status bar; they do not prove that indexing
 has finished or that diagnostics apply to the latest document version.
@@ -214,7 +216,9 @@ Failed-attempt diagnostics have distinct paths under
 `evidence/diagnostics/<step-key>/attempt-N.json`; `evidence.artifactPath` and manifest
 `stepId` / `attempt` metadata identify them without filename guessing. Successful retries
 retain earlier failures. Case analysis selects screenshots from those exact attempts,
-including the final recovered state, instead of mixing images from different attempts.
+including the failed step's own final attempt even when later steps run, instead of mixing
+images from different attempts. Within the four-image budget, failure and recovery evidence
+take priority over intermediate sub-screenshots; the overall final state is also retained.
 
 ### Process management
 

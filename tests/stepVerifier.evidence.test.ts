@@ -92,6 +92,36 @@ describe("StepVerifier evidence", () => {
     });
   });
 
+  it.each([4096, 4097])("bounds an evidence reason of %s characters without changing the returned reason", async (length) => {
+    const driver = new VscodeDriver();
+    const prefix = 'Notification not found: "Ready". Got: [';
+    const notification = "x".repeat(length - prefix.length - 1);
+    vi.spyOn(driver, "getNotifications").mockResolvedValue([notification]);
+    const trace = evidence();
+    const result = await new StepVerifier(driver).verify({
+      id: "long-failure", action: "wait", verifyNotification: "Ready",
+    }, trace);
+
+    expect(result.reason).toHaveLength(length);
+    expect(trace.checks[0]?.reason).toBe(result.reason!.slice(0, 4096));
+    expect(trace.checks[0]?.reasonTruncated).toBe(length > 4096 ? true : undefined);
+  });
+
+  it("redacts and bounds exceptional evidence reasons without replacing the thrown error", async () => {
+    const driver = new VscodeDriver();
+    const error = new Error("api-key=fake-exception-secret\n" + "x".repeat(6000));
+    vi.spyOn(driver, "getNotifications").mockRejectedValue(error);
+    const trace = evidence();
+    await expect(new StepVerifier(driver).verify({
+      id: "exception", action: "wait", verifyNotification: "Ready",
+    }, trace)).rejects.toBe(error);
+
+    expect(trace.checks[0]?.reason).toHaveLength(4096);
+    expect(trace.checks[0]?.reason).toContain("api-key=<redacted>");
+    expect(trace.checks[0]?.reason).not.toContain("fake-exception-secret");
+    expect(trace.checks[0]?.reasonTruncated).toBe(true);
+  });
+
   it("uses one file read for assertions, hash, and bounded content", async () => {
     const driver = new VscodeDriver();
     const content = "public class App {}\n" + "x".repeat(5000);
