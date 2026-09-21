@@ -291,6 +291,7 @@ export interface ProbeSnapshot {
 
 export interface FailureEvidence {
   capturedAt: string;
+  artifactPath?: string;
   collectionErrors?: string[];
   problemCounts?: {
     errors: number;
@@ -338,7 +339,8 @@ export interface EvidenceArtifact {
   path: string;
   label?: string;
   stepId?: string;
-  phase?: "before" | "after" | "error" | "sub";
+  attempt?: number;
+  phase?: "before" | "after" | "verified" | "error" | "sub";
   sizeBytes?: number;
 }
 
@@ -437,12 +439,43 @@ export interface VscodeDriverOptions {
 
 // ─── Execution Result Types ────────────────────────────────
 
+export type VerifierKind = Exclude<Extract<keyof TestStep, `verify${string}`>, "verify">;
+
+export type VerificationActual = Record<string, string | number | boolean | string[]>;
+
+export interface VerificationCheck {
+  verifier: VerifierKind;
+  expected: NonNullable<TestStep[VerifierKind]>;
+  status: "not-run" | "skipped" | "pass" | "fail" | "error";
+  startedAt?: string;
+  observedAt?: string;
+  completedAt?: string;
+  actual?: VerificationActual;
+  /** Fields whose captured values were bounded, not the full observed values. */
+  truncated?: string[];
+  reason?: string;
+}
+
+export interface VerificationEvidence {
+  status: "not-run" | "not-configured" | "pass" | "fail" | "error";
+  checks: VerificationCheck[];
+}
+
+export interface StepScreenshot {
+  path: string;
+  phase: "before" | "after" | "verified" | "error" | "sub";
+  capturedAt: string;
+}
+
 export interface StepAttemptResult {
   attempt: number;
   status: "pass" | "fail" | "skip" | "error";
   reason?: string;
   duration: number;
   screenshot?: string;
+  screenshots?: StepScreenshot[];
+  verification?: VerificationEvidence;
+  collectionErrors?: string[];
   llmVerification?: VerificationResult;
   evidence?: FailureEvidence;
 }
@@ -455,6 +488,9 @@ export interface StepResult {
   duration: number;
   snapshot?: A11yNode;
   screenshot?: string; // base64 or file path
+  screenshots?: StepScreenshot[];
+  verification?: VerificationEvidence;
+  collectionErrors?: string[];
   attempts?: StepAttemptResult[];
   llmVerification?: VerificationResult;
   evidence?: FailureEvidence;

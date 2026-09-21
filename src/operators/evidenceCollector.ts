@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -71,7 +72,7 @@ function redactSecrets(value: string): string {
     .replace(/((?:file:\/\/)?\/(?:home|Users)\/)[^/\s"]+/g, "$1<user>");
 }
 
-function sanitizeEvidence<T>(value: T): T {
+export function sanitizeEvidence<T>(value: T): T {
   if (typeof value === "string") return redactSecrets(value) as T;
   if (Array.isArray(value)) return value.map(sanitizeEvidence) as T;
   if (!value || typeof value !== "object") return value;
@@ -205,7 +206,10 @@ export class EvidenceCollector {
     private readonly outputDir: string | null,
   ) {}
 
-  async captureFailureEvidence(stepId: string): Promise<FailureEvidence> {
+  async captureFailureEvidence(stepId: string, attempt?: number): Promise<FailureEvidence> {
+    if (attempt !== undefined && (!Number.isSafeInteger(attempt) || attempt < 1)) {
+      throw new Error(`Invalid evidence attempt: ${attempt}`);
+    }
     const collectionErrors: string[] = [];
     try {
       await this.driver.refreshProbeSnapshot();
@@ -247,13 +251,19 @@ export class EvidenceCollector {
     });
 
     if (this.outputDir) {
-      const diagnosticsDir = path.join(this.outputDir, "evidence", "diagnostics");
-      fs.mkdirSync(diagnosticsDir, { recursive: true });
       const safeStepId = stepId.replace(/[^a-z0-9-]+/gi, "-");
-      writeEvidenceJson(
-        path.join(diagnosticsDir, `${safeStepId}-evidence.json`),
-        evidence,
+      const stepKey = `${safeStepId.slice(0, 80)}-${createHash("sha256").update(stepId).digest("hex").slice(0, 12)}`;
+      const diagnosticsDir = path.join(
+        this.outputDir, "evidence", "diagnostics",
+        ...(attempt === undefined ? [] : [stepKey]),
       );
+      fs.mkdirSync(diagnosticsDir, { recursive: true });
+      const artifactPath = path.join(
+        diagnosticsDir,
+        attempt === undefined ? `${safeStepId}-evidence.json` : `attempt-${attempt}.json`,
+      );
+      evidence.artifactPath = portableRelativePath(this.outputDir, artifactPath);
+      writeEvidenceJson(artifactPath, evidence);
     }
     return evidence;
   }
@@ -340,14 +350,28 @@ export class EvidenceCollector {
     }
 
     const diagnosticsDir = path.join(evidenceDir, "diagnostics");
-    if (fs.existsSync(diagnosticsDir)) {
-      for (const fileName of fs.readdirSync(diagnosticsDir).sort()) {
-        const artifactPath = path.join(diagnosticsDir, fileName);
-        if (fs.statSync(artifactPath).isFile()) {
-          artifacts.push(this.createArtifact("diagnostics", artifactPath, undefined, {
-            stepId: fileName.replace(/-evidence\.json$/i, ""),
-          }));
+    const stepArtifacts = new Map<string, Pick<EvidenceArtifact, "stepId" | "attempt" | "phase">>();
+    for (const result of results) {
+      const attempts = result.attempts?.length ? result.attempts : [result];
+      for (const entry of attempts) {
+        const metadata = {
+          stepId: result.stepId,
+          ...("attempt" in entry ? { attempt: entry.attempt } : {}),
+        };
+        if (entry.evidence?.artifactPath) {
+          stepArtifacts.set(entry.evidence.artifactPath, metadata);
         }
+        for (const screenshot of entry.screenshots ?? []) {
+          stepArtifacts.set(screenshot.path, { ...metadata, phase: screenshot.phase });
+        }
+      }
+    }
+    if (fs.existsSync(diagnosticsDir)) {
+      for (const artifactPath of listFiles(diagnosticsDir, (file) => file.endsWith(".json")).sort()) {
+        const metadata = stepArtifacts.get(portableRelativePath(this.outputDir, artifactPath));
+        artifacts.push(this.createArtifact("diagnostics", artifactPath, undefined, metadata ?? {
+          stepId: path.basename(artifactPath).replace(/-evidence\.json$/i, ""),
+        }));
       }
     }
     for (const log of runEvidence?.logs ?? []) {
@@ -362,12 +386,13 @@ export class EvidenceCollector {
     if (fs.existsSync(screenshotDir)) {
       for (const fileName of fs.readdirSync(screenshotDir).filter((name) => name.endsWith(".png")).sort()) {
         const artifactPath = path.join(screenshotDir, fileName);
-        const standardMatch = fileName.match(/^\d+_(.+)_(before|after|error)\.png$/);
+        const standardMatch = fileName.match(/^\d+_(.+)_(before|after|verified|error)\.png$/);
         const subMatch = fileName.match(/^\d+_(.+)_sub_\d+_.+\.png$/);
-        artifacts.push(this.createArtifact("screenshot", artifactPath, fileName, {
+        const metadata = stepArtifacts.get(portableRelativePath(this.outputDir, artifactPath));
+        artifacts.push(this.createArtifact("screenshot", artifactPath, fileName, metadata ?? {
           ...(standardMatch ? {
             stepId: standardMatch[1],
-            phase: standardMatch[2] as "before" | "after" | "error",
+            phase: standardMatch[2] as "before" | "after" | "verified" | "error",
           } : subMatch ? {
             stepId: subMatch[1],
             phase: "sub" as const,
@@ -378,7 +403,14 @@ export class EvidenceCollector {
 
     const collectionErrors = [
       ...(runEvidence?.collectionErrors ?? []),
-      ...results.flatMap((result) => result.evidence?.collectionErrors ?? []),
+      ...results.flatMap((result) => [
+        ...(result.collectionErrors ?? []),
+        ...(result.evidence?.collectionErrors ?? []),
+        ...(result.attempts ?? []).flatMap((attempt) => [
+          ...(attempt.collectionErrors ?? []),
+          ...(attempt.evidence?.collectionErrors ?? []),
+        ]),
+      ]),
     ];
     const hasFailures = results.some((result) => result.status === "fail" || result.status === "error");
     const manifest: EvidenceBundleManifest = {
@@ -431,7 +463,7 @@ export class EvidenceCollector {
     type: EvidenceArtifact["type"],
     artifactPath: string,
     label?: string,
-    metadata: Pick<EvidenceArtifact, "stepId" | "phase"> = {},
+    metadata: Pick<EvidenceArtifact, "stepId" | "attempt" | "phase"> = {},
   ): EvidenceArtifact {
     return {
       type,

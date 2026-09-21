@@ -181,6 +181,41 @@ collector adds bounded, secret-redacted logs and component metadata; Java runs c
 include an optional adapter for JDT LS logs and bundled JDT/Lombok artifacts. The probe is
 loaded only for these opt-in modes and is not part of the extension under test.
 
+In `case` and `evidence-only` modes, each step and retry attempt also records:
+
+- `verification`: per-check expected values, the bounded values actually read by the
+  verifier, observation timestamps, and `pass` / `fail` / `error` / `skipped` /
+  `not-run` status. Checks after a fail-fast failure remain `not-run`. A step with no
+  executed structured assertion is `not-configured`, not proof of its natural-language
+  expectation; an action error before verification is `not-run`.
+- `screenshots`: timestamped, output-relative references for `before`, `after` (action),
+  `verified` (after deterministic verification), `error`, and intermediate `sub` images.
+  The original `screenshot` field remains unchanged. `NN_<stepId>_verified.png` is
+  additional evidence; it does not replace the action-time image.
+- `collectionErrors`: screenshot, evidence-collection, and step-model failures. A
+  malformed step-model response is recorded as unavailable, not as a successful audit.
+
+Observations come from the checks themselves, not a second read of a potentially changed
+UI. File content assertions in evidence modes use one read for the verdict, excerpt, and
+SHA-256 hash. Text is limited to 4,096 characters and arrays to 100 entries / 4,096 total
+characters, with truncated
+fields explicitly marked; evidence is redacted before runner persistence or model input.
+Driver helpers that return only a boolean record that boolean, not an invented count or
+full UI snapshot. Problems counts describe the status bar; they do not prove that indexing
+has finished or that diagnostics apply to the latest document version.
+
+Step screenshot verification in `case` mode receives the action-time image, the separately
+labeled post-verification image when available, and structured observations. Verifiers
+may change the UI themselves: completion verification reads items and then dismisses the
+popup, so its absence in the later image is not by itself evidence of failure.
+The existing downgrade threshold, retry behavior, and verdict policy are unchanged.
+
+Failed-attempt diagnostics have distinct paths under
+`evidence/diagnostics/<step-key>/attempt-N.json`; `evidence.artifactPath` and manifest
+`stepId` / `attempt` metadata identify them without filename guessing. Successful retries
+retain earlier failures. Case analysis selects screenshots from those exact attempts,
+including the final recovered state, instead of mixing images from different attempts.
+
 ### Process management
 
 - The VS Code user-data directory is cleared before each launch to avoid restoring old windows.

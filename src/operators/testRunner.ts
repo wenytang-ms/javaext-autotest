@@ -16,12 +16,14 @@ import type {
   RepoClone,
   StepAttemptResult,
   StepResult,
+  StepScreenshot,
   TestPlan,
   TestReport,
   TestStep,
+  VerificationEvidence,
 } from "../types.js";
 import { ActionResolver } from "./actionResolver.js";
-import { EvidenceCollector } from "./evidenceCollector.js";
+import { EvidenceCollector, sanitizeEvidence } from "./evidenceCollector.js";
 import { LLMClient, type CaseScreenshot } from "./llmClient.js";
 import { StepVerifier } from "./stepVerifier.js";
 
@@ -259,7 +261,7 @@ export class TestRunner {
     const attempts: StepAttemptResult[] = [];
     let last: StepResult | undefined;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const result = await this.executeStep(step);
+      const result = await this.executeStep(step, attempt);
       if (this.analysisMode !== "legacy") {
         attempts.push({
           attempt,
@@ -267,6 +269,9 @@ export class TestRunner {
           reason: result.reason,
           duration: result.duration,
           screenshot: result.screenshot,
+          screenshots: result.screenshots,
+          verification: result.verification,
+          collectionErrors: result.collectionErrors,
           llmVerification: result.llmVerification,
           evidence: result.evidence,
         });
@@ -334,16 +339,39 @@ export class TestRunner {
       : message;
   }
 
-  private async executeStep(step: TestStep): Promise<StepResult> {
+  private async executeStep(step: TestStep, attempt = 1): Promise<StepResult> {
     const start = Date.now();
     let beforePath: string | undefined;
+    const verification: VerificationEvidence | undefined = this.analysisMode === "legacy"
+      ? undefined
+      : { status: "not-run", checks: [] };
+    const screenshots: StepScreenshot[] = [];
+    const collectionErrors: string[] = [];
+    const captureScreenshot = async (phase: "before" | "after" | "verified" | "error") => {
+      const screenshot = await this.takeScreenshot(step.id, phase, collectionErrors);
+      if (screenshot) recordScreenshot(screenshot, phase);
+      return screenshot;
+    };
+    const recordScreenshot = (filePath: string, phase: StepScreenshot["phase"]) => {
+      if (!verification || !this.outputDir) return;
+      screenshots.push({
+        path: path.relative(this.outputDir, filePath).replaceAll("\\", "/"),
+        phase,
+        capturedAt: new Date().toISOString(),
+      });
+    };
+    const evidenceFields = () => verification ? sanitizeEvidence({
+      verification,
+      screenshots,
+      ...(collectionErrors.length ? { collectionErrors } : {}),
+    }) : {};
 
     try {
       if (step.waitBefore) {
         await this.driver.wait(step.waitBefore);
       }
 
-      beforePath = await this.takeScreenshot(step.id, "before");
+      beforePath = await captureScreenshot("before");
 
       // Install a sub-screenshot sink so compound driver operations
       // (e.g. clickViewTitleAction, contextMenuOnTreeItem) can capture
@@ -362,20 +390,28 @@ export class TestRunner {
         const safeLabel = label.replace(/[^a-z0-9-]+/gi, "-").replace(/^-+|-+$/g, "") || "step";
         const fileName = `${seq}_${step.id}_sub_${subN}_${safeLabel}.png`;
         const filePath = path.join(this.screenshotDir, fileName);
-        await this.driver.screenshot(filePath);
+        try {
+          await this.driver.screenshot(filePath);
+          recordScreenshot(filePath, "sub");
+        } catch (e) {
+          const message = `Sub-screenshot ${fileName} failed: ${(e as Error).message}`;
+          collectionErrors.push(message);
+          console.warn(`⚠️  [${step.id}] ${message}`);
+        }
       });
 
       let afterPath: string | undefined;
       try {
         // Delegate action execution to ActionResolver
         await this.actionResolver.resolve(step.action);
-        afterPath = await this.takeScreenshot(step.id, "after");
+        afterPath = await captureScreenshot("after");
       } finally {
         this.driver.setSubScreenshotSink(previousSink);
       }
 
       // Delegate verification to StepVerifier (deterministic only)
-      const verifyResult = await this.verifier.verify(step);
+      const verifyResult = await this.verifier.verify(step, verification);
+      const verifiedPath = verification ? await captureScreenshot("verified") : undefined;
 
       let status: StepResult["status"] = verifyResult.passed ? "pass" : "fail";
       let reason = verifyResult.reason;
@@ -404,7 +440,10 @@ export class TestRunner {
         afterPath &&
         this.llm?.isConfigured()
       ) {
-        const llmResult = await this.runLlmVerification(step, beforePath, afterPath);
+        const llmResult = await this.runLlmVerification(
+          step, beforePath, afterPath,
+          verification ? { verification, verifiedPath, screenshots, collectionErrors } : undefined,
+        );
         if (llmResult) {
           llmVerification = llmResult;
           if (!llmResult.passed && llmResult.confidence >= 0.6) {
@@ -419,7 +458,7 @@ export class TestRunner {
 
       const evidence = status === "pass" || !this.evidenceCollector
         ? undefined
-        : await this.captureFailureEvidence(step.id);
+        : await this.captureFailureEvidence(step.id, attempt, collectionErrors);
       return {
         stepId: step.id,
         action: step.action,
@@ -427,15 +466,16 @@ export class TestRunner {
         reason,
         duration: Date.now() - start,
         screenshot: afterPath,
+        ...evidenceFields(),
         ...(this.analysisMode !== "legacy" && llmVerification
           ? { llmVerification }
           : {}),
         ...(evidence ? { evidence } : {}),
       };
     } catch (e) {
-      const errorPath = await this.takeScreenshot(step.id, "error");
+      const errorPath = await captureScreenshot("error");
       const evidence = this.evidenceCollector
-        ? await this.captureFailureEvidence(step.id)
+        ? await this.captureFailureEvidence(step.id, attempt, collectionErrors)
         : undefined;
 
       return {
@@ -445,6 +485,7 @@ export class TestRunner {
         reason: (e as Error).message,
         duration: Date.now() - start,
         screenshot: errorPath,
+        ...evidenceFields(),
         ...(evidence ? { evidence } : {}),
       };
     }
@@ -459,19 +500,39 @@ export class TestRunner {
     step: TestStep,
     beforePath: string,
     afterPath: string,
+    context?: {
+      verification: VerificationEvidence;
+      verifiedPath?: string;
+      screenshots: StepScreenshot[];
+      collectionErrors: string[];
+    },
   ): Promise<{ passed: boolean; reasoning: string; confidence: number; suggestion?: string } | null> {
     if (!this.llm) return null;
     try {
       const beforeBase64 = fs.readFileSync(beforePath).toString("base64");
       const afterBase64 = fs.readFileSync(afterPath).toString("base64");
-      return await this.llm.verifyStep(beforeBase64, afterBase64, step.action, step.verify ?? "");
+      return await this.llm.verifyStep(
+        beforeBase64, afterBase64, step.action, step.verify ?? "",
+        context ? {
+          verification: sanitizeEvidence(context.verification),
+          screenshots: context.screenshots,
+          afterVerificationBase64: context.verifiedPath
+            ? fs.readFileSync(context.verifiedPath).toString("base64")
+            : undefined,
+        } : undefined,
+      );
     } catch (e) {
+      context?.collectionErrors.push(`LLM verification unavailable: ${(e as Error).message}`);
       console.log(`   🤖 ⚠️ [${step.id}] LLM verification error (keeping deterministic pass): ${(e as Error).message}`);
       return null;
     }
   }
 
-  private async takeScreenshot(stepId: string, phase: "before" | "after" | "error"): Promise<string | undefined> {
+  private async takeScreenshot(
+    stepId: string,
+    phase: "before" | "after" | "verified" | "error",
+    collectionErrors?: string[],
+  ): Promise<string | undefined> {
     if (!this.screenshotDir) return undefined;
     try {
       const seq = String(++this.screenshotCounter).padStart(2, "0");
@@ -479,7 +540,10 @@ export class TestRunner {
       const filePath = path.join(this.screenshotDir, fileName);
       await this.driver.screenshot(filePath);
       return filePath;
-    } catch {
+    } catch (e) {
+      const message = `Screenshot ${phase} failed: ${(e as Error).message}`;
+      collectionErrors?.push(message);
+      console.warn(`⚠️  [${stepId}] ${message}`);
       return undefined;
     }
   }
@@ -509,11 +573,14 @@ export class TestRunner {
     }
   }
 
-  private async captureFailureEvidence(stepId: string): Promise<StepResult["evidence"] | undefined> {
+  private async captureFailureEvidence(
+    stepId: string, attempt: number, collectionErrors: string[],
+  ): Promise<StepResult["evidence"] | undefined> {
     if (!this.evidenceCollector) return undefined;
     try {
-      return await this.evidenceCollector.captureFailureEvidence(stepId);
+      return await this.evidenceCollector.captureFailureEvidence(stepId, attempt);
     } catch (e) {
+      collectionErrors.push(`Failure evidence unavailable: ${(e as Error).message}`);
       console.warn(`⚠️  [${stepId}] Could not collect failure evidence: ${(e as Error).message}`);
       return undefined;
     }
@@ -558,7 +625,7 @@ export class TestRunner {
 
     const files = fs.readdirSync(this.screenshotDir)
       .filter((fileName) => fileName.endsWith(".png"))
-      .sort();
+      .sort((left, right) => parseInt(left, 10) - parseInt(right, 10) || left.localeCompare(right));
     const selected = new Set<string>();
     const failing = results.filter((result) =>
       result.status === "fail" || result.status === "error"
@@ -578,7 +645,36 @@ export class TestRunner {
       }
     };
 
-    if (failing.length > 0) {
+    const recordedAttempts = results.flatMap<StepResult | StepAttemptResult>((result) =>
+      result.attempts?.length ? result.attempts : [result]
+    );
+    const addRecordedScreenshot = (
+      entry: StepResult | StepAttemptResult | undefined,
+      phases: StepScreenshot["phase"][],
+    ) => {
+      for (const phase of phases) {
+        const screenshot = entry?.screenshots?.find((candidate) => candidate.phase === phase);
+        if (screenshot) {
+          selected.add(path.basename(screenshot.path));
+          return;
+        }
+      }
+    };
+    if (recordedAttempts.some((entry) => entry.screenshots !== undefined)) {
+      const firstFailure = recordedAttempts.find((entry) =>
+        entry.status === "fail" || entry.status === "error"
+      );
+      if (firstFailure) {
+        addRecordedScreenshot(firstFailure, ["before"]);
+        const sub = firstFailure.screenshots?.filter((entry) => entry.phase === "sub").at(-1);
+        if (sub) selected.add(path.basename(sub.path));
+        addRecordedScreenshot(firstFailure, ["error", "verified", "after"]);
+      } else {
+        addRecordedScreenshot(recordedAttempts[0], ["before"]);
+        addRecordedScreenshot(recordedAttempts[Math.floor(recordedAttempts.length / 2)], ["verified", "after"]);
+      }
+      addRecordedScreenshot(recordedAttempts.at(-1), ["error", "verified", "after"]);
+    } else if (failing.length > 0) {
       addStepScreenshot(failing[0]!.stepId, ["before"]);
       const firstFailureSubScreenshot = files
         .filter((candidate) => candidate.includes(`_${failing[0]!.stepId}_sub_`))

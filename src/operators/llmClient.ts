@@ -18,9 +18,11 @@ import type {
   FailureEvidence,
   RunEvidence,
   StepResult,
+  StepScreenshot,
   TestPlan,
   TestReport,
   VerificationResult,
+  VerificationEvidence,
 } from "../types.js";
 
 const DEFAULT_CASE_ANALYSIS_MAX_TOKENS = 4_000;
@@ -178,6 +180,12 @@ export interface CaseScreenshot {
   base64: string;
 }
 
+export interface StepVerificationContext {
+  verification: VerificationEvidence;
+  screenshots?: StepScreenshot[];
+  afterVerificationBase64?: string;
+}
+
 export interface CaseAnalysisInput {
   plan: TestPlan;
   report: TestReport;
@@ -235,6 +243,7 @@ function compactEvidence(evidence: FailureEvidence | undefined) {
   });
   return {
     capturedAt: evidence.capturedAt,
+    artifactPath: evidence.artifactPath,
     collectionErrors: evidence.collectionErrors,
     problemCounts: evidence.problemCounts,
     activeEditor: evidence.activeEditor,
@@ -271,6 +280,9 @@ function compactStep(step: StepResult): unknown {
     reason: limitText(step.reason, 8_000),
     duration: step.duration,
     screenshot: step.screenshot,
+    screenshots: step.screenshots,
+    verification: step.verification,
+    collectionErrors: step.collectionErrors,
     attempts: step.attempts?.map((attempt) => ({
       ...attempt,
       reason: limitText(attempt.reason, 8_000),
@@ -311,6 +323,7 @@ export class LLMClient {
     afterBase64: string,
     action: string,
     verifyDescription: string,
+    context?: StepVerificationContext,
   ): Promise<VerificationResult> {
     if (!this.isConfigured()) {
       return {
@@ -352,6 +365,43 @@ export class LLMClient {
       ],
       max_completion_tokens: 800,
     };
+    if (context) {
+      body.messages[0]!.content = SYSTEM_PROMPT + `
+
+For this evidence-backed request, interpret AFTER as the action-time image, not
+necessarily the final state. Evaluate the expected outcome using the combined
+deterministic observations and the separately labeled POST-VERIFICATION image.
+An intermediate loading state in AFTER is not a failure when later evidence
+establishes the expected outcome. Checks may dismiss transient UI after observing
+it. Missing or truncated evidence is a limitation, not proof of success or failure.`;
+      body.messages[1]!.content = [
+        ...(Array.isArray(body.messages[1]!.content) ? body.messages[1]!.content : []),
+        {
+          type: "text",
+          text: `Deterministic verification evidence:\n${JSON.stringify(sanitizeForLlm({
+            verification: context.verification,
+            screenshots: context.screenshots,
+          }))}\n`
+            + "The AFTER image was taken immediately after the action, before verification polling. "
+            + "The POST-VERIFICATION image, when present, was taken after all executed checks. "
+            + "Use the recorded observation/completion timestamps to distinguish intermediate state from verified state. "
+            + "Checks can interact with the UI (for example, completion verification dismisses the popup after reading its items). "
+            + "A popup absent after that cleanup does not alone contradict the earlier observation. "
+            + "A not-configured, skipped, or not-run check is not proof that its expected outcome was verified. "
+            + "Bounded excerpts and helper booleans are not complete UI snapshots; audit their actual scope.",
+        },
+        ...(context.afterVerificationBase64 ? [{
+          type: "text",
+          text: "POST-VERIFICATION:",
+        }, {
+          type: "image_url",
+          image_url: {
+            url: `data:image/png;base64,${context.afterVerificationBase64}`,
+            detail: "high",
+          },
+        }] : []),
+      ];
+    }
 
     try {
       const response = await fetch(url, {
@@ -372,6 +422,16 @@ export class LLMClient {
       };
       const content = data.choices?.[0]?.message?.content ?? "";
       const result = this.parseJson<VerificationResult>(content);
+      if (context && (
+        typeof result.passed !== "boolean"
+        || typeof result.reasoning !== "string"
+        || typeof result.confidence !== "number"
+        || !Number.isFinite(result.confidence)
+        || result.confidence < 0
+        || result.confidence > 1
+      )) {
+        throw new Error("Invalid LLM verification response");
+      }
       return {
         passed: !!result.passed,
         reasoning: result.reasoning ?? "No reasoning provided",
@@ -380,7 +440,7 @@ export class LLMClient {
       };
     } catch (e) {
       const message = (e as Error).message;
-      if (message.includes("JSON")) {
+      if (!context && message.includes("JSON")) {
         return {
           passed: true,
           reasoning: `LLM response parse error: ${message}`,

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { VscodeDriver } from "../src/drivers/vscodeDriver.js";
+import { VscodeDriver } from "../src/drivers/vscodeDriver.js";
 import { EvidenceCollector, extractFailureSignatures } from "../src/operators/evidenceCollector.js";
 import type { ProbeSnapshot } from "../src/types.js";
 
@@ -22,6 +22,26 @@ afterEach(() => {
 });
 
 describe("EvidenceCollector", () => {
+  it("isolates attempts and step IDs that normalize to the same filename", async () => {
+    const outputDir = createTemporaryDirectory();
+    const driver = new VscodeDriver();
+    vi.spyOn(driver, "refreshProbeSnapshot").mockResolvedValue();
+    vi.spyOn(driver, "getProblemsCount").mockResolvedValue({ errors: 0, warnings: 0 });
+    vi.spyOn(driver, "getProblems").mockResolvedValue([]);
+    const collector = new EvidenceCollector(driver, outputDir);
+    const first = await collector.captureFailureEvidence("same/name", 1);
+    const second = await collector.captureFailureEvidence("same/name", 2);
+    const other = await collector.captureFailureEvidence("same?name", 1);
+    const dotted = await collector.captureFailureEvidence("..", 1);
+    const paths = [first, second, other, dotted].map((entry) => entry.artifactPath!);
+    expect(new Set(paths).size).toBe(4);
+    for (const artifact of paths) {
+      expect(artifact).toMatch(/^evidence\/diagnostics\/[^/]+\/attempt-[12]\.json$/);
+      expect(fs.existsSync(path.join(outputDir, artifact))).toBe(true);
+    }
+    await expect(collector.captureFailureEvidence("invalid", 0)).rejects.toThrow("Invalid evidence attempt");
+  });
+
   it("collects probe diagnostics, extension versions, bundled jars, and redacted JDT logs", async () => {
     const root = createTemporaryDirectory();
     const userDataDir = path.join(root, "user-data");
