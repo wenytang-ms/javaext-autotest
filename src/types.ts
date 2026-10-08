@@ -60,6 +60,11 @@ export interface RepoClone {
   branch?: string;
 }
 
+export interface ActionExecutionContext {
+  /** Absolute execution deadline shared by all recovery attempts. */
+  deadline: number;
+}
+
 export interface TestStep {
   id: string;
   action: string;
@@ -140,6 +145,8 @@ export interface TreeItemVerification {
 export interface EditorTabVerification {
   /** Editor tab title to check */
   title: string;
+  /** Require the matching tab to be active. Defaults to false. */
+  active?: boolean;
 }
 
 export interface WebviewVerification {

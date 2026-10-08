@@ -151,10 +151,36 @@ ActionResolver uses a deterministic regex dictionary. Unmatched actions are exec
 | `verifyQuickInput` | object | Quick Input validation checks with `noError`, `messageContains`, and `messageExcludes` |
 | `verifyDialog` | object | Modal dialog visibility/content with `visible` and `contains` |
 | `verifyTreeItem` | object | Tree item appearance/disappearance with `name`, `visible`, `exact`, optional visible `count`, and optional 1-based `level` (`aria-level`) |
-| `verifyEditorTab` | object | Editor tab title appearance |
+| `verifyEditorTab` | object | Editor tab title appearance; optional `active: true` requires that tab to be selected |
 | `verifyWebview` | object | Active webview text checks with `contains` and `notContains` |
 | `verifyOutputChannel` | object | Output channel text checks with `channel`, `contains`, and `notContains` |
 | `verifyTerminal` | object | Terminal text checks with `contains` and `notContains` |
+
+### State-driven hover links
+
+Use `hoverAndClickAction "<text>" "<label>"` to hover editor text, wait for an
+actual visible command link, and click it once. A loading popup is not readiness.
+If the popup disappears before the click, the operation re-hovers the target.
+It does not repeatedly restart an existing loading popup.
+DOM observation starts before the hover is triggered and records whether a
+popup appeared, so even a popup dismissed between driver polls is recoverable.
+
+The operation uses `step.timeout` (or the framework's default verification
+budget) as one shared execution deadline, including recovery. There is no
+separate link timeout, and recovery does not restart the deadline. Existing
+`hoverOnText` and `clickHoverAction` retain their previous behavior.
+
+```yaml
+- id: "navigate-to-super"
+  action: 'hoverAndClickAction "greet" "Go to Super Implementation"'
+  verifyEditorTab:
+    title: "Base.java"
+    active: true
+```
+
+Verify the target editor contents after the active-tab check has completed.
+Intermediate `hover-open`, `hover-lost`, `hover-restored`, and
+`hover-action-ready` screenshots are diagnostic evidence, not verdicts.
 
 ---
 

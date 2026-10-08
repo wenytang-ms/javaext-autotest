@@ -103,7 +103,9 @@ For each step, `TestRunner` performs this sequence:
 
 1. Apply `waitBefore`, if present.
 2. Capture the before screenshot.
-3. Call `ActionResolver.resolve(step.action)`.
+3. Call `ActionResolver.resolve(step.action, context)` with a step execution
+   deadline. Existing actions ignore this additive context; the state-driven
+   `hoverAndClickAction` shares it across opening, waiting, and recovery.
 4. Capture the after screenshot, or an error screenshot if execution fails.
 5. Call `StepVerifier.verify(step)`, optionally recording each check's expected and observed
    values while it executes. Fail-fast leaves subsequent checks explicitly `not-run`.
@@ -156,6 +158,17 @@ within the four-image budget. Collection errors from all attempts
 survive in the manifest, rather than only those on the final result.
 
 ## Driver design
+
+`hoverAndClickAction` is a compound Driver operation. It waits on DOM conditions
+for an actual visible hover action, not on elapsed time or a language-server
+status label. A DOM observer is attached before triggering hover and remembers
+the first popup appearance, including appearances lost between driver polls.
+A missing popup after opening triggers re-hover; a still-loading popup remains
+undisturbed. The observer is disconnected on completion or failure.
+Only one click is dispatched, and the independent
+`StepVerifier` must still prove the expected outcome. Its optional
+`verifyEditorTab.active` check distinguishes a selected tab from an already-open
+background tab. Check navigation before reading the target editor contents.
 
 `VscodeDriver` is the public operation SDK used by `ActionResolver` and `StepVerifier`. It intentionally exposes stable, scenario-oriented methods such as `openFile`, `expandTreeItem`, `applyCodeAction`, `getProblemsCount`, and `runAllTests`.
 

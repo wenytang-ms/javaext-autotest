@@ -74,7 +74,7 @@ export interface TreeOperations {
   clickTreeItemAction(itemName: string, actionLabel: string): Promise<void>;
   clickViewTitleAction(viewName: string, actionLabel: string): Promise<void>;
   clickEditorTitleAction(actionLabel: string): Promise<void>;
-  waitForEditorTab(title: string, timeoutMs?: number): Promise<boolean>;
+  waitForEditorTab(title: string, timeoutMs?: number, active?: boolean): Promise<boolean>;
 }
 
 export const treeOperations: TreeOperations = {
@@ -374,10 +374,12 @@ export const treeOperations: TreeOperations = {
     throw new Error(`Inline action "${actionLabel}" on tree item "${itemName}" was not clickable: ${JSON.stringify(lastActionInfo)}`);
   },
 
-  async waitForEditorTab(this: DriverContext, title: string, timeoutMs = 15_000): Promise<boolean> {
+  async waitForEditorTab(this: DriverContext, title: string, timeoutMs = 15_000, active = false): Promise<boolean> {
     const page = this.getPage();
+    const tabs = page.getByRole("tab", { name: title });
+    const matchingTabs = active ? tabs.and(page.locator(".tab.active")) : tabs;
     try {
-      await page.getByRole("tab", { name: title }).first().waitFor({
+      await matchingTabs.first().waitFor({
         state: "visible",
         timeout: timeoutMs,
       });

@@ -487,10 +487,16 @@ export class StepVerifier {
     if (!step.verifyEditorTab) return null;
 
     const timeoutMs = (step.timeout ?? DEFAULT_TREE_ITEM_TIMEOUT_S) * 1000;
-    const found = await this.driver.waitForEditorTab(step.verifyEditorTab.title, timeoutMs);
-    observe?.({ appeared: found });
+    const { title, active } = step.verifyEditorTab;
+    if (active !== undefined && typeof active !== "boolean") {
+      return { passed: false, reason: "verifyEditorTab.active must be a boolean" };
+    }
+    const found = active
+      ? await this.driver.waitForEditorTab(title, timeoutMs, true)
+      : await this.driver.waitForEditorTab(title, timeoutMs);
+    observe?.({ appeared: found, ...(active ? { active: found } : {}) });
     if (!found) {
-      return { passed: false, reason: `Editor tab "${step.verifyEditorTab.title}" did not appear within ${timeoutMs / 1000}s` };
+      return { passed: false, reason: `Editor tab "${title}" did not ${active ? "become active" : "appear"} within ${timeoutMs / 1000}s` };
     }
     return { passed: true };
   }

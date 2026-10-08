@@ -93,6 +93,7 @@ steps:
       level: 1               # optional 1-based tree depth (aria-level)
     verifyEditorTab:         # verify editor tab exists
       title: "App.java"
+      active: true           # optional: require this tab to be selected
     verifyDialog:
       contains: "dialog text"
       visible: true
@@ -138,6 +139,7 @@ steps:
 | `organizeImports` | Shift+Alt+O |
 | `renameSymbol <newName>` | F2 rename |
 | `hoverOnText <text>` | Hover to trigger hover provider |
+| `hoverAndClickAction "<text>" "<label>"` | Wait for a real visible hover link, restore a dismissed popup, then click once; uses one shared step execution deadline |
 | `dismissHover` | Dismiss hover popup |
 
 ### UI Operations

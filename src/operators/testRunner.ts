@@ -26,6 +26,7 @@ import { ActionResolver } from "./actionResolver.js";
 import { EvidenceCollector, sanitizeEvidence } from "./evidenceCollector.js";
 import { LLMClient, type CaseScreenshot } from "./llmClient.js";
 import { StepVerifier } from "./stepVerifier.js";
+import { DEFAULT_VERIFY_TIMEOUT_S } from "./defaults.js";
 
 export interface TestRunnerOptions {
   /** Output directory for this test run. Contains screenshots/ and results.json. */
@@ -403,7 +404,9 @@ export class TestRunner {
       let afterPath: string | undefined;
       try {
         // Delegate action execution to ActionResolver
-        await this.actionResolver.resolve(step.action);
+        await this.actionResolver.resolve(step.action, {
+          deadline: Date.now() + (step.timeout ?? DEFAULT_VERIFY_TIMEOUT_S) * 1000,
+        });
         afterPath = await captureScreenshot("after");
       } finally {
         this.driver.setSubScreenshotSink(previousSink);

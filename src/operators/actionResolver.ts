@@ -6,9 +6,11 @@
  */
 
 import type { VscodeDriver } from "../drivers/vscodeDriver.js";
+import type { ActionExecutionContext } from "../types.js";
 import {
   DEFAULT_LANGUAGE_SERVER_TIMEOUT_MS,
   DEFAULT_TEST_DISCOVERY_TIMEOUT_MS,
+  DEFAULT_VERIFY_TIMEOUT_S,
 } from "./defaults.js";
 
 export interface ActionResolverOptions {
@@ -18,7 +20,7 @@ export interface ActionResolverOptions {
 
 interface ActionPattern {
   regex: RegExp;
-  handler: (match: RegExpMatchArray) => Promise<void>;
+  handler: (match: RegExpMatchArray, context?: ActionExecutionContext) => Promise<void>;
 }
 
 export class ActionResolver {
@@ -36,13 +38,13 @@ export class ActionResolver {
    * Resolve and execute an action string.
    * Returns true if a pattern matched, false if fallback was used.
    */
-  async resolve(action: string): Promise<boolean> {
+  async resolve(action: string, context?: ActionExecutionContext): Promise<boolean> {
     const trimmed = action.trim();
 
     for (const { regex, handler } of this.patterns) {
       const match = trimmed.match(regex);
       if (match) {
-        await handler(match);
+        await handler(match, context);
         return true;
       }
     }
@@ -310,6 +312,15 @@ export class ActionResolver {
       },
 
       // ── Hover ──
+      {
+        regex: /^hoverAndClickAction\s+(.+)$/i,
+        handler: async (m, context) => {
+          const [text, label] = this.parseActionArgs(m[1], 2, "hoverAndClickAction");
+          await d.hoverAndClickAction(text, label, context ?? {
+            deadline: Date.now() + DEFAULT_VERIFY_TIMEOUT_S * 1000,
+          });
+        },
+      },
       {
         regex: /^hoverOnText\s+(.+)$/i,
         handler: async (m) => { await d.hoverOnText(m[1].trim()); },
