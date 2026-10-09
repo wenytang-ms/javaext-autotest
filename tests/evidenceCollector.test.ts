@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { VscodeDriver } from "../src/drivers/vscodeDriver.js";
-import { EvidenceCollector, extractFailureSignatures } from "../src/operators/evidenceCollector.js";
+import { EvidenceCollector, extractFailureSignatures, formatErrorEvidence } from "../src/operators/evidenceCollector.js";
 import type { ProbeSnapshot } from "../src/types.js";
 
 const temporaryDirectories: string[] = [];
@@ -133,6 +133,7 @@ describe("EvidenceCollector", () => {
       getProblems: vi.fn().mockResolvedValue([]),
       getUserDataDir: vi.fn().mockReturnValue(userDataDir),
       getExtensionsDir: vi.fn().mockReturnValue(extensionsDir),
+      getLaunchDiagnostics: vi.fn().mockReturnValue([]),
     } as unknown as VscodeDriver;
     const collector = new EvidenceCollector(driver, outputDir);
 

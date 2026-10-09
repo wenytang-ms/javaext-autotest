@@ -52,6 +52,23 @@ function configureLlm(runner: TestRunner) {
 }
 
 describe("TestRunner evidence chain", () => {
+  it.each(["legacy", "evidence-only"] as const)("retains startup cause details only in opt-in mode (%s)", async mode => {
+    const { runner, driver } = createRunner({ id: "ready", action: "wait" }, mode);
+    const cause = Object.assign(new Error("connection closed"), { code: "ECONNRESET" });
+    vi.mocked(driver.launch).mockRejectedValue(Object.assign(new Error("", { cause }), { statusCode: 502 }));
+    const report = await runner.run();
+    expect(report.crashed).toBe(true);
+    expect(report.results).toEqual([]);
+    if (mode === "legacy") {
+      expect(report.crashReason).toBe("");
+      expect(report.evidence).toBeUndefined();
+    } else {
+      expect(report.crashReason).toContain("ECONNRESET");
+      expect(report.crashReason).toContain('"statusCode": 502');
+      expect(report.crashReason).toContain('"stack":');
+    }
+  });
+
   it.each(["case", "evidence-only"] as const)(
     "redacts failed and exceptional step/attempt reasons before persistence in %s mode",
     async (mode) => {

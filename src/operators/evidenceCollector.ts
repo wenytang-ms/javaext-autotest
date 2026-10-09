@@ -86,6 +86,23 @@ export function sanitizeEvidence<T>(value: T): T {
   return sanitized as T;
 }
 
+export function formatErrorEvidence(error: unknown): string {
+  function details(value: unknown, level: number): unknown {
+    if (level > 4) return "<cause depth limit>";
+    if (!value || typeof value !== "object") return String(value);
+    const record = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const key of ["name", "message", "stack", "code", "statusCode", "status", "errno", "syscall", "hostname", "address", "port"]) {
+      const entry = record[key];
+      if (typeof entry === "string") result[key] = entry.slice(0, 32_768);
+      else if (typeof entry === "number") result[key] = entry;
+    }
+    if (record.cause !== undefined) result.cause = details(record.cause, level + 1);
+    return Object.keys(result).length ? result : { thrownValue: String(value) };
+  }
+  return JSON.stringify(sanitizeEvidence(details(error, 0)), null, 2).slice(0, MAX_LOG_TAIL_BYTES);
+}
+
 function writeEvidenceJson(filePath: string, value: unknown): void {
   fs.writeFileSync(filePath, JSON.stringify(sanitizeEvidence(value), null, 2));
 }
@@ -201,10 +218,16 @@ export function extractFailureSignatures(texts: string[]): string[] {
 }
 
 export class EvidenceCollector {
+  private runnerFailure: string | undefined;
+
   constructor(
     private readonly driver: VscodeDriver,
     private readonly outputDir: string | null,
   ) {}
+
+  recordRunnerFailure(error: unknown): void {
+    this.runnerFailure = formatErrorEvidence(error);
+  }
 
   async captureFailureEvidence(stepId: string, attempt?: number): Promise<FailureEvidence> {
     if (attempt !== undefined && (!Number.isSafeInteger(attempt) || attempt < 1)) {
@@ -277,7 +300,7 @@ export class EvidenceCollector {
     if (!probe) {
       collectionErrors.push(`Probe snapshot is unavailable or invalid${probePath ? `: ${probePath}` : ""}`);
     }
-    const logs = this.collectJdtLogs(userDataDir);
+    const logs = [...this.collectJdtLogs(userDataDir), ...this.collectRunnerLogs()];
     const installedExtensions = probe?.extensions?.length
       ? probe.extensions
       : collectInstalledExtensions(extensionsDir);
@@ -299,6 +322,7 @@ export class EvidenceCollector {
         javaHome: process.env.JAVA_HOME,
         javaVersion: readJavaVersion(),
         autoTestVersion: readAutoTestVersion(),
+        autoTestCommit: process.env.AUTOTEST_SOURCE_SHA || undefined,
         githubRunId: process.env.GITHUB_RUN_ID,
         githubJob: process.env.GITHUB_JOB,
         runnerOs: process.env.RUNNER_OS,
@@ -456,6 +480,24 @@ export class EvidenceCollector {
         sizeBytes: fs.statSync(sourcePath).size,
         tail,
       };
+    });
+  }
+
+  private collectRunnerLogs(): EvidenceLog[] {
+    const entries = [
+      { kind: "runner-launch", text: JSON.stringify(sanitizeEvidence(this.driver.getLaunchDiagnostics()), null, 2) },
+      ...(this.runnerFailure ? [{ kind: "runner-failure", text: this.runnerFailure }] : []),
+    ];
+    return entries.filter((entry) => entry.text !== "[]").map(({ kind, text }) => {
+      let artifactPath: string | undefined;
+      if (this.outputDir) {
+        const directory = path.join(this.outputDir, "evidence", "logs");
+        fs.mkdirSync(directory, { recursive: true });
+        const destination = path.join(directory, `${kind}.log`);
+        fs.writeFileSync(destination, text, "utf8");
+        artifactPath = portableRelativePath(this.outputDir, destination);
+      }
+      return { kind, sourcePath: kind, artifactPath, sizeBytes: Buffer.byteLength(text), tail: text };
     });
   }
 

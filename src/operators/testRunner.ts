@@ -23,7 +23,7 @@ import type {
   VerificationEvidence,
 } from "../types.js";
 import { ActionResolver } from "./actionResolver.js";
-import { EvidenceCollector, sanitizeEvidence } from "./evidenceCollector.js";
+import { EvidenceCollector, formatErrorEvidence, sanitizeEvidence } from "./evidenceCollector.js";
 import { LLMClient, type CaseScreenshot } from "./llmClient.js";
 import { StepVerifier } from "./stepVerifier.js";
 import { DEFAULT_VERIFY_TIMEOUT_S } from "./defaults.js";
@@ -118,7 +118,8 @@ export class TestRunner {
 
       await this.runSteps(results);
     } catch (e) {
-      const errorMsg = (e as Error).message;
+      const errorMsg = this.evidenceCollector ? formatErrorEvidence(e) : (e as Error).message;
+      this.evidenceCollector?.recordRunnerFailure(e);
       console.error(`\n💥 Fatal error: ${errorMsg}`);
       crashed = true;
       crashReason = errorMsg;

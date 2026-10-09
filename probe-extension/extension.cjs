@@ -30,6 +30,45 @@ function diagnosticCode(code) {
   };
 }
 
+function excerpt(text, line) {
+  return text.split(/\r?\n/)
+    .slice(Math.max(0, line - 3), line + 4)
+    .map((value, index) => `${Math.max(0, line - 3) + index + 1}: ${value}`)
+    .join("\n")
+    .slice(0, 4096);
+}
+
+function activeEditorSnapshot() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) return undefined;
+  const document = editor.document;
+  const buffer = document.getText();
+  const position = editor.selection.active;
+  const snapshot = {
+    uri: document.uri.toString(),
+    file: document.uri.scheme === "file" ? document.uri.fsPath : undefined,
+    languageId: document.languageId,
+    isDirty: document.isDirty,
+    documentVersion: document.version,
+    position: { line: position.line + 1, character: position.character + 1 },
+    bufferExcerpt: excerpt(buffer, position.line),
+  };
+  if (snapshot.file) {
+    try {
+      if (fs.statSync(snapshot.file).size > 256 * 1024) {
+        snapshot.diskReadError = "Disk comparison omitted: file exceeds 256 KiB";
+        return snapshot;
+      }
+      const disk = fs.readFileSync(snapshot.file, "utf8");
+      snapshot.diskExcerpt = excerpt(disk, position.line);
+      snapshot.diskMatchesBuffer = disk === buffer;
+    } catch (error) {
+      snapshot.diskReadError = error.message;
+    }
+  }
+  return snapshot;
+}
+
 function createSnapshot() {
   const diagnostics = [];
   for (const [uri, entries] of vscode.languages.getDiagnostics()) {
@@ -82,15 +121,7 @@ function createSnapshot() {
       execPath: process.execPath,
     },
     workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.toString()),
-    activeEditor: vscode.window.activeTextEditor
-      ? {
-          uri: vscode.window.activeTextEditor.document.uri.toString(),
-          file: vscode.window.activeTextEditor.document.uri.scheme === "file"
-            ? vscode.window.activeTextEditor.document.uri.fsPath
-            : undefined,
-          languageId: vscode.window.activeTextEditor.document.languageId,
-        }
-      : undefined,
+    activeEditor: activeEditorSnapshot(),
     diagnostics,
     extensions,
   };

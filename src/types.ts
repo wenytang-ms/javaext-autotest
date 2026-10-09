@@ -291,6 +291,13 @@ export interface ProbeSnapshot {
     uri: string;
     file?: string;
     languageId: string;
+    isDirty?: boolean;
+    documentVersion?: number;
+    position?: { line: number; character: number };
+    bufferExcerpt?: string;
+    diskExcerpt?: string;
+    diskMatchesBuffer?: boolean;
+    diskReadError?: string;
   };
   diagnostics: Diagnostic[];
   extensions: InstalledExtensionEvidence[];
@@ -328,6 +335,7 @@ export interface RunEvidence {
     javaHome?: string;
     javaVersion?: string;
     autoTestVersion?: string;
+    autoTestCommit?: string;
     githubRunId?: string;
     githubJob?: string;
     runnerOs?: string;
