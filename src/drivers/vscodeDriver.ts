@@ -115,6 +115,7 @@ export class VscodeDriver {
   private probeSnapshotPath: string | null = null;
   /** Lazy mapping of (commandId+args) → keybinding key for executeVSCodeCommand */
   private keybindingsByCommand: KeybindingEntry[] = [];
+  private launchDiagnostics: Array<{ capturedAt: string; stage: string; details?: Record<string, unknown> }> = [];
 
   constructor(options: VscodeDriverOptions = {}) {
     this.options = {
@@ -139,9 +140,12 @@ export class VscodeDriver {
     this.actualUserDataDir = null;
     this.actualExtensionsDir = null;
     this.probeSnapshotPath = null;
+    this.launchDiagnostics = [];
 
     const version = this.options.vscodeVersion ?? "insiders";
+    this.recordLaunchDiagnostic("resolve-vscode", { requestedVersion: version });
     const vscodePath = await downloadAndUnzipVSCode(version);
+    this.recordLaunchDiagnostic("resolve-cli", { executablePath: vscodePath });
     const [cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
 
     const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(this.getTemporaryDirectory(), "autotest-"));
@@ -163,6 +167,7 @@ export class VscodeDriver {
     }
 
     const localExtensions = this.options.localExtensions ?? [];
+    this.recordLaunchDiagnostic("install-local-extensions", { count: localExtensions.length });
     if (localExtensions.length > 0) {
       if (!extensionsDir) {
         throw new Error("Unable to resolve VS Code extensions directory for local extension installation.");
@@ -203,9 +208,11 @@ export class VscodeDriver {
       ...(this.options.vsix ?? []),
     ];
     const usePreRelease = this.options.preRelease === true; // default false
+    this.recordLaunchDiagnostic("install-extensions", { extensions: allExtensions, preRelease: usePreRelease });
     if (allExtensions.length > 0) {
       console.log(`📦 Installing ${allExtensions.length} extension(s)${usePreRelease ? " (pre-release)" : " (stable)"}...`);
       for (const ext of allExtensions) {
+        this.recordLaunchDiagnostic("install-extension", { extension: ext });
         const isVsix = ext.endsWith(".vsix");
         console.log(`   ↳ ${ext}${isVsix ? " (vsix)" : ""}`);
         const installArgs = [
@@ -225,6 +232,7 @@ export class VscodeDriver {
             shell: process.platform === "win32",
           });
         } catch (e) {
+          this.recordLaunchDiagnostic("extension-install-failed", { extension: ext, message: (e as Error).message });
           console.warn(`   ⚠️  Failed to install ${ext}: ${(e as Error).message}`);
         }
       }
@@ -255,6 +263,7 @@ export class VscodeDriver {
     }
 
     if (this.options.workspacePath) {
+      this.recordLaunchDiagnostic("prepare-workspace", { workspace: this.options.workspacePath });
       // Use git worktree for workspace isolation — this preserves all project paths
       // so the Language Server doesn't get confused by temp directory copies.
       const wsPath = this.options.workspacePath;
@@ -298,6 +307,7 @@ export class VscodeDriver {
         console.log(`⚙️  Wrote workspace settings: ${wsSettingsPath}`);
       }
     } else if (this.options.filePath) {
+      this.recordLaunchDiagnostic("prepare-file", { file: this.options.filePath });
       // Single file mode — copy the file to a temp dir and open it directly
       const tmpDir = this.getTemporaryDirectory();
       const fixedDir = path.join(tmpDir, "autotest-workspace");
@@ -312,6 +322,7 @@ export class VscodeDriver {
 
     // Inject settings.json into the ACTUAL user data dir that VSCode will use (from baseArgs)
     const actualUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1] ?? userDataDir;
+    this.recordLaunchDiagnostic("write-settings", { userDataDir: actualUserDataDir });
     this.probeSnapshotPath = this.options.enableEvidenceProbe
       ? path.join(actualUserDataDir, "User", "autotest-probe.json")
       : null;
@@ -354,6 +365,7 @@ export class VscodeDriver {
     fs.mkdirSync(path.dirname(keybindingsPath), { recursive: true });
     fs.writeFileSync(keybindingsPath, "[]");
 
+    this.recordLaunchDiagnostic("launch-electron", { executablePath: vscodePath, args });
     this.app = await _electron.launch({
       executablePath: vscodePath,
       env: {
@@ -367,13 +379,16 @@ export class VscodeDriver {
     // Track the main process PID for targeted cleanup on close
     this.launchedPid = this.app.process().pid ?? null;
 
+    this.recordLaunchDiagnostic("wait-first-window");
     this.page = await this.app.firstWindow();
     // Wait for VSCode workbench to render. See DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS
     // — Windows runners with multiple heavy extensions can need significantly
     // more than the historic 30 s; the value is now configurable via
     // VscodeDriverOptions.workbenchLaunchTimeoutMs for advanced scenarios.
     const workbenchTimeout = this.options.workbenchLaunchTimeoutMs ?? DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS;
+    this.recordLaunchDiagnostic("wait-workbench", { timeoutMs: workbenchTimeout });
     await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: workbenchTimeout });
+    this.recordLaunchDiagnostic("workbench-ready");
 
     // Auto-dismiss Electron native dialogs (e.g. redhat.java refactoring
     // confirmation, delete file confirmation). These dialogs are outside
@@ -436,6 +451,15 @@ export class VscodeDriver {
     if (trustMode !== "disabled") {
       await this.handleWorkspaceTrustPrompt(trustMode);
     }
+  }
+
+  getLaunchDiagnostics(): ReadonlyArray<{ capturedAt: string; stage: string; details?: Record<string, unknown> }> {
+    return this.launchDiagnostics;
+  }
+
+  private recordLaunchDiagnostic(stage: string, details?: Record<string, unknown>): void {
+    if (!this.options.enableLaunchDiagnostics) return;
+    this.launchDiagnostics.push({ capturedAt: new Date().toISOString(), stage, ...(details ? { details } : {}) });
   }
 
   /**

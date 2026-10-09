@@ -7,8 +7,16 @@
 export interface TestPlan {
   name: string;
   description?: string;
+  logging?: LoggingOptions;
   setup: TestSetup;
   steps: TestStep[];
+}
+
+export interface LoggingOptions {
+  /** Enable per-run console and diagnostic files. Defaults to true when configured. */
+  enabled?: boolean;
+  /** Log directory. YAML paths are relative to the plan; SDK paths are relative to cwd. */
+  outputDir?: string;
 }
 
 export interface TestSetup {
@@ -435,6 +443,8 @@ export interface VscodeDriverOptions {
   mockOpenDialog?: string[][];
   /** Load the bundled diagnostics probe used by opt-in evidence collection. */
   enableEvidenceProbe?: boolean;
+  /** Record timestamped launch stages for configured diagnostic logging. */
+  enableLaunchDiagnostics?: boolean;
   /**
    * Max time (ms) to wait for `.monaco-workbench` to render after launch.
    * Defaults to {@link DEFAULT_WORKBENCH_LAUNCH_TIMEOUT_MS}. Bump this for slow

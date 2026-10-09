@@ -388,6 +388,8 @@ Quote arguments that contain spaces. Both the view name and the action label are
 | `--output <dir>` | Output directory (default: `./test-results/<plan-name>`) |
 | `--no-llm` | Skip LLM verification |
 | `--analysis-mode <mode>` | `legacy` (default), `case`, or `evidence-only` |
+| `--logs` / `--no-logs` | Enable/disable configured per-run console and diagnostic files; does not change analysis mode |
+| `--log-output <dir>` | Enable logs in this directory (default: `<output>/logs`) |
 
 ### `autotest run-all <dir>`
 | Option | Description |
@@ -398,6 +400,8 @@ Quote arguments that contain spaces. Both the view name and the action label are
 | `--output <dir>` | Output directory (default: `./test-results`) |
 | `--no-llm` | Skip LLM analysis |
 | `--analysis-mode <mode>` | `legacy` (default), `case`, or `evidence-only` |
+| `--logs` / `--no-logs` | Enable/disable configured per-case log files |
+| `--log-output <dir>` | Enable separate logs under `<dir>/<plan-name>` |
 | `--exclude <plans>` | Comma-separated plan names to exclude |
 
 ### `autotest analyze <dir>`
@@ -408,6 +412,17 @@ Quote arguments that contain spaces. Both the view name and the action label are
 | `--no-llm` | Skip aggregate LLM analysis |
 
 ## Test Output
+
+Logging can also be enabled with top-level YAML
+`logging: { enabled: true, outputDir: "../run-logs/my-case" }`.
+YAML paths are relative to the plan; CLI/SDK paths are relative to cwd.
+CLI/SDK fields override YAML. Without `outputDir`, logs use `<case-output>/logs`.
+Keep this opt-in and independent of analysis: logging must not change actions,
+retries, legacy report fields or verdicts. Save full per-run stdout/stderr,
+startup stages, bounded exception chains and bounded/redacted component logs.
+When evidence mode is active, include diagnostic log copies in its manifest.
+Console log write failures are explicit; do not turn them into a test failure
+or silently discard them. Use different log directories for concurrent runs.
 
 ```
 test-results/<plan-name>/

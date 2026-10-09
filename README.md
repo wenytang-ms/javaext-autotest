@@ -39,6 +39,66 @@ npx autotest run test-plans/java-maven.yaml --analysis-mode evidence-only
 npx autotest analyze test-results --analysis-mode case --report-only
 ```
 
+### Configurable logging
+
+Console output remains enabled by default. File logging is opt-in and independent
+of `--analysis-mode`; enabling logs does not enable case analysis or change
+actions, retries, test verdicts, exit-code policy or legacy report fields.
+
+```bash
+# Build this checkout before using newly added CLI options
+npm run build
+node dist/cli/index.js run test-plans/java-maven.yaml --logs
+
+# Choose a log directory; --log-output also enables logging
+node dist/cli/index.js run test-plans/java-maven.yaml --log-output run-logs/java-maven
+
+# run-all creates a separate log directory for each plan
+node dist/cli/index.js run-all test-plans --log-output run-logs
+```
+
+The equivalent top-level YAML configuration is:
+
+```yaml
+logging:
+  enabled: true
+  outputDir: "../run-logs/my-case"
+```
+
+`logging.outputDir` is relative to the YAML file. CLI paths are relative to the
+current directory and override YAML settings. `--logs` enables the YAML directory
+or defaults to `<case-output>/logs`; `--no-logs` overrides YAML logging, but does
+not remove evidence artifacts requested by `--analysis-mode`. Configuring
+`logging: {}` also enables the default log directory.
+
+SDK callers can pass `logging: { enabled: true, outputDir: "run-logs/my-case" }`
+in `TestRunnerOptions`; these fields override the plan's logging configuration.
+SDK paths are relative to the current directory.
+If the SDK has no case `outputDir`, its default log directory is `./logs`.
+
+Each enabled case saves:
+
+- `autotest.log`: the complete stdout/stderr produced during `TestRunner.run()`,
+  including driver/action/verifier/LLM output, with terminal output preserved.
+  CLI setup/validation and the `run-all` aggregate summary remain terminal output.
+- `runner-launch.log`: timestamped startup stages, including version resolution,
+  extension installation, Electron launch and workbench readiness.
+- `runner-failure.log`: fatal exception stack, bounded cause/aggregate chains and
+  transport/status fields, including failures with empty messages.
+- `environment.json`: runtime/extension metadata, log source mappings and
+  explicit diagnostic collection errors.
+- `vscode-N.log` and `jdtls-N.log`: available VS Code/extension-host and JDT LS
+  logs. Component logs retain bounded, redacted excerpts rather than full files;
+  VS Code collection is limited to 20 files and each excerpt to 64 KiB.
+
+Saved logs use the existing secret/user-path redaction. Startup and component
+diagnostics are also referenced by evidence manifests when evidence mode is
+active. Reusing a log directory replaces AutoTest-owned files from the previous
+run, not unrelated files. Give concurrent runs different directories; their
+console captures are isolated even when they share a Node process. Invalid
+configuration or a console-log write failure is reported explicitly; a logging
+failure does not rewrite the saved test verdict.
+
 ### Requirements
 
 - Node.js >= 22

@@ -6,6 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import yaml from "js-yaml";
 import type { RepoClone, TestPlan, TestStep } from "../types.js";
+import { parseLoggingOptions } from "./runLogging.js";
 
 export function loadTestPlan(filePath: string): TestPlan {
   const absolutePath = path.resolve(filePath);
@@ -68,6 +69,7 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
   return {
     name: raw.name as string,
     description: raw.description as string | undefined,
+    ...(raw.logging === undefined ? {} : { logging: parseLoggingOptions(raw.logging, planDir) }),
     setup: {
       extension: setup.extension as string,
       extensionPath: setup.extensionPath

@@ -62,9 +62,13 @@ function listFiles(root: string, predicate: (filePath: string) => boolean): stri
 }
 
 function redactSecrets(value: string): string {
+  const redactValue = (_: string, prefix: string, secret: string): string => {
+    const quote = secret.startsWith('"') || secret.startsWith("'") ? secret[0] : "";
+    return `${prefix}${quote}<redacted>${quote}`;
+  };
   return value
-    .replace(/(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;"'\\]+/gi, "$1<redacted>")
-    .replace(/((?:api[-_ ]?key|access[-_ ]?token|client[-_ ]?secret)\s*[:=]\s*)[^\s,;"'\\]+/gi, "$1<redacted>")
+    .replace(/(authorization["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:(?:bearer|basic)\s+)?[^\s,;"'\\]+)/gi, redactValue)
+    .replace(/((?:api[-_ ]?key|access[-_ ]?token|client[-_ ]?secret|password|credential)["']?\s*[:=]\s*)("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;"'\\]+)/gi, redactValue)
     .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b/g, "<redacted-token>")
     .replace(/(https?:\/\/[^:/\s]+:)[^@\s]+@/g, "$1<redacted>@")
     .replace(/([A-Za-z]:\\Users\\)[^\\\r\n"]+/g, "$1<user>")
@@ -84,6 +88,29 @@ export function sanitizeEvidence<T>(value: T): T {
       : sanitizeEvidence(entry);
   }
   return sanitized as T;
+}
+
+export function formatErrorEvidence(error: unknown): string {
+  let remainingEntries = 32;
+  function details(value: unknown, level: number): unknown {
+    if (level > 4) return "<cause depth limit>";
+    if (remainingEntries-- <= 0) return "<error entry limit>";
+    if (!value || typeof value !== "object") return String(value).slice(0, 32_768);
+    const record = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const key of ["name", "message", "stack", "code", "statusCode", "status", "errno", "syscall", "hostname", "address", "port", "exitCode", "signal"]) {
+      const entry = record[key];
+      if (typeof entry === "string") result[key] = entry.slice(0, 32_768);
+      else if (typeof entry === "number") result[key] = entry;
+    }
+    if (record.cause !== undefined) result.cause = details(record.cause, level + 1);
+    if (Array.isArray(record.errors)) {
+      result.errors = record.errors.slice(0, 8).map(entry => details(entry, level + 1));
+      if (record.errors.length > 8) result.errorsTruncated = record.errors.length - 8;
+    }
+    return Object.keys(result).length ? result : { thrownValue: String(value) };
+  }
+  return JSON.stringify(sanitizeEvidence(details(error, 0)), null, 2).slice(0, MAX_LOG_TAIL_BYTES);
 }
 
 function writeEvidenceJson(filePath: string, value: unknown): void {
@@ -201,10 +228,21 @@ export function extractFailureSignatures(texts: string[]): string[] {
 }
 
 export class EvidenceCollector {
+  private runnerFailure: string | undefined;
+
   constructor(
     private readonly driver: VscodeDriver,
     private readonly outputDir: string | null,
+    private readonly logDirectory?: string | null,
   ) {}
+
+  recordRunnerFailure(error: unknown): void {
+    this.runnerFailure = formatErrorEvidence(error);
+  }
+
+  resetRunnerFailure(): void {
+    this.runnerFailure = undefined;
+  }
 
   async captureFailureEvidence(stepId: string, attempt?: number): Promise<FailureEvidence> {
     if (attempt !== undefined && (!Number.isSafeInteger(attempt) || attempt < 1)) {
@@ -277,7 +315,11 @@ export class EvidenceCollector {
     if (!probe) {
       collectionErrors.push(`Probe snapshot is unavailable or invalid${probePath ? `: ${probePath}` : ""}`);
     }
-    const logs = this.collectJdtLogs(userDataDir);
+    const logs = [
+      ...this.collectJdtLogs(userDataDir),
+      ...this.collectVscodeLogs(userDataDir, collectionErrors),
+      ...this.collectRunnerLogs(),
+    ];
     const installedExtensions = probe?.extensions?.length
       ? probe.extensions
       : collectInstalledExtensions(extensionsDir);
@@ -436,27 +478,62 @@ export class EvidenceCollector {
       const normalized = filePath.replace(/\\/g, "/");
       return normalized.endsWith("/redhat.java/jdt_ws/.metadata/.log");
     });
-    const logsDir = this.outputDir ? path.join(this.outputDir, "evidence", "logs") : null;
-    if (logsDir) fs.mkdirSync(logsDir, { recursive: true });
-
     return logPaths.map((sourcePath, index) => {
-      const artifactPath = logsDir
-        ? path.join(logsDir, `jdtls-${index + 1}.log`)
-        : undefined;
       const tail = readLogEvidence(sourcePath);
-      if (artifactPath) {
-        fs.writeFileSync(artifactPath, tail, "utf8");
-      }
       return {
         kind: "jdtls" as const,
         sourcePath: portableRelativePath(userDataDir, sourcePath),
-        artifactPath: artifactPath && this.outputDir
-          ? portableRelativePath(this.outputDir, artifactPath)
-          : undefined,
+        artifactPath: this.writeLog(`jdtls-${index + 1}.log`, tail),
         sizeBytes: fs.statSync(sourcePath).size,
         tail,
       };
     });
+  }
+
+  private collectVscodeLogs(userDataDir: string | null, collectionErrors: string[]): EvidenceLog[] {
+    if (!this.logDirectory || !userDataDir) return [];
+    const paths = listFiles(path.join(userDataDir, "logs"), file => file.endsWith(".log")).sort().slice(-20);
+    const logs: EvidenceLog[] = [];
+    for (const [index, sourcePath] of paths.entries()) {
+      try {
+        const tail = readLogEvidence(sourcePath);
+        logs.push({
+          kind: "vscode",
+          sourcePath: portableRelativePath(userDataDir, sourcePath),
+          artifactPath: this.writeLog(`vscode-${index + 1}.log`, tail),
+          sizeBytes: fs.statSync(sourcePath).size,
+          tail,
+        });
+      } catch (error) {
+        collectionErrors.push(`VS Code log collection failed (${sourcePath}): ${(error as Error).message}`);
+      }
+    }
+    return logs;
+  }
+
+  private collectRunnerLogs(): EvidenceLog[] {
+    if (!this.logDirectory) return [];
+    const entries = [
+      { kind: "runner-launch", text: JSON.stringify(sanitizeEvidence(this.driver.getLaunchDiagnostics()), null, 2) },
+      ...(this.runnerFailure ? [{ kind: "runner-failure", text: this.runnerFailure }] : []),
+    ];
+    return entries.filter(entry => entry.text !== "[]").map(({ kind, text }) => ({
+      kind, sourcePath: kind,
+      artifactPath: this.writeLog(`${kind}.log`, text),
+      sizeBytes: Buffer.byteLength(text), tail: text,
+    }));
+  }
+
+  private writeLog(name: string, text: string): string | undefined {
+    const evidenceDirectory = this.outputDir ? path.join(this.outputDir, "evidence", "logs") : null;
+    for (const directory of new Set([evidenceDirectory, this.logDirectory])) {
+      if (!directory) continue;
+      fs.mkdirSync(directory, { recursive: true });
+      fs.writeFileSync(path.join(directory, name), text, "utf8");
+    }
+    return evidenceDirectory && this.outputDir
+      ? portableRelativePath(this.outputDir, path.join(evidenceDirectory, name))
+      : this.logDirectory ? name : undefined;
   }
 
   private createArtifact(

@@ -13,6 +13,7 @@ import type {
   AnalysisMode,
   CaseAnalysis,
   EvidenceBundleManifest,
+  LoggingOptions,
   RepoClone,
   StepAttemptResult,
   StepResult,
@@ -23,7 +24,8 @@ import type {
   VerificationEvidence,
 } from "../types.js";
 import { ActionResolver } from "./actionResolver.js";
-import { EvidenceCollector, sanitizeEvidence } from "./evidenceCollector.js";
+import { EvidenceCollector, formatErrorEvidence, sanitizeEvidence } from "./evidenceCollector.js";
+import { parseLoggingOptions, withRunLogging } from "./runLogging.js";
 import { LLMClient, type CaseScreenshot } from "./llmClient.js";
 import { StepVerifier } from "./stepVerifier.js";
 import { DEFAULT_VERIFY_TIMEOUT_S } from "./defaults.js";
@@ -35,6 +37,8 @@ export interface TestRunnerOptions {
   noLLM?: boolean;
   /** Opt-in analysis pipeline. Defaults to legacy behavior. */
   analysisMode?: AnalysisMode;
+  /** Optional per-run console and diagnostic log output. Overrides YAML logging fields. */
+  logging?: LoggingOptions;
 }
 
 export class TestRunner {
@@ -43,6 +47,8 @@ export class TestRunner {
   private actionResolver: ActionResolver;
   private verifier: StepVerifier;
   private evidenceCollector: EvidenceCollector | null;
+  private diagnosticCollector: EvidenceCollector | null;
+  private logDirectory: string | null;
   private llm: LLMClient | null;
   private analysisMode: AnalysisMode;
   private outputDir: string | null;
@@ -55,6 +61,11 @@ export class TestRunner {
     this.screenshotDir = this.outputDir ? path.join(this.outputDir, "screenshots") : null;
     this.analysisMode = options.analysisMode ?? "legacy";
     const evidenceEnabled = this.analysisMode !== "legacy";
+    const logging = parseLoggingOptions(options.logging
+      ? { ...plan.logging, ...options.logging } : plan.logging);
+    this.logDirectory = logging && logging.enabled !== false
+      ? logging.outputDir ?? path.resolve(this.outputDir ?? process.cwd(), "logs")
+      : null;
 
     this.driver = new VscodeDriver({
       vscodeVersion: plan.setup.vscodeVersion,
@@ -74,7 +85,8 @@ export class TestRunner {
       workspaceSettings: plan.setup.workspaceSettings,
       workspaceTrust: plan.setup.workspaceTrust,
       mockOpenDialog: plan.setup.mockOpenDialog,
-      enableEvidenceProbe: evidenceEnabled,
+      enableEvidenceProbe: evidenceEnabled || this.logDirectory !== null,
+      enableLaunchDiagnostics: this.logDirectory !== null,
     });
 
     this.actionResolver = new ActionResolver(this.driver, {
@@ -83,7 +95,10 @@ export class TestRunner {
 
     this.verifier = new StepVerifier(this.driver);
     this.evidenceCollector = evidenceEnabled
-      ? new EvidenceCollector(this.driver, this.outputDir)
+      ? new EvidenceCollector(this.driver, this.outputDir, this.logDirectory)
+      : null;
+    this.diagnosticCollector = this.logDirectory
+      ? this.evidenceCollector ?? new EvidenceCollector(this.driver, null, this.logDirectory)
       : null;
     this.llm = options.noLLM || this.analysisMode === "evidence-only"
       ? null
@@ -97,12 +112,19 @@ export class TestRunner {
 
   async run(): Promise<TestReport> {
     const startTime = new Date();
+    this.diagnosticCollector?.resetRunnerFailure();
+    this.prepareOutputDir();
+    const run = () => this.runPrepared(startTime);
+    return this.logDirectory ? withRunLogging(this.logDirectory, run) : run();
+  }
+
+  private async runPrepared(startTime: Date): Promise<TestReport> {
     const results: StepResult[] = [];
     let crashed = false;
     let crashReason = "";
     let runEvidence: TestReport["evidence"];
 
-    this.prepareOutputDir();
+    if (this.outputDir) console.log(`📂 Output → ${this.outputDir}`);
 
     try {
       if (this.plan.setup.repos?.length) {
@@ -119,11 +141,13 @@ export class TestRunner {
       await this.runSteps(results);
     } catch (e) {
       const errorMsg = (e as Error).message;
-      console.error(`\n💥 Fatal error: ${errorMsg}`);
+      this.diagnosticCollector?.recordRunnerFailure(e);
+      console.error(`\n💥 Fatal error: ${this.logDirectory ? formatErrorEvidence(e) : errorMsg}`);
       crashed = true;
       crashReason = errorMsg;
     } finally {
-      if (this.evidenceCollector) {
+      const collector = this.evidenceCollector ?? this.diagnosticCollector;
+      if (collector) {
         const collectionErrors: string[] = [];
         try {
           await this.driver.refreshProbeSnapshot();
@@ -131,7 +155,14 @@ export class TestRunner {
           collectionErrors.push(`Probe refresh failed: ${(e as Error).message}`);
         }
         try {
-          runEvidence = this.evidenceCollector.collectRunEvidence(collectionErrors);
+          const collected = collector.collectRunEvidence(collectionErrors);
+          if (this.evidenceCollector) runEvidence = collected;
+          if (this.logDirectory) {
+            fs.writeFileSync(
+              path.join(this.logDirectory, "environment.json"),
+              JSON.stringify(sanitizeEvidence(collected), null, 2),
+            );
+          }
         } catch (e) {
           console.warn(`⚠️  Could not collect run evidence: ${(e as Error).message}`);
         }
@@ -235,7 +266,6 @@ export class TestRunner {
     }
     fs.mkdirSync(this.outputDir, { recursive: true });
     fs.mkdirSync(this.screenshotDir!, { recursive: true });
-    console.log(`📂 Output → ${this.outputDir}`);
   }
 
   /** Execute every step in the plan, appending results in place. */

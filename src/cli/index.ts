@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadTestPlan, validateTestPlanFile } from "../operators/planParser.js";
 import { TestRunner } from "../operators/testRunner.js";
-import type { AnalysisMode } from "../types.js";
+import type { AnalysisMode, LoggingOptions } from "../types.js";
 import { generateSummary } from "./summary.js";
 
 /**
@@ -82,6 +82,21 @@ function analysisModeOption(): Option {
     .default("legacy");
 }
 
+function loggingOptions(opts: { logs?: boolean; logOutput?: string }, planName?: string): LoggingOptions | undefined {
+  if (opts.logOutput !== undefined && !opts.logOutput.trim()) {
+    throw new Error("--log-output must be a non-empty directory");
+  }
+  if (opts.logs === false) {
+    if (opts.logOutput !== undefined) throw new Error("--no-logs cannot be combined with --log-output");
+    return { enabled: false };
+  }
+  if (!opts.logs && opts.logOutput === undefined) return undefined;
+  return {
+    enabled: true,
+    ...(opts.logOutput ? { outputDir: path.resolve(opts.logOutput, ...(planName ? [planName] : [])) } : {}),
+  };
+}
+
 program
   .name("autotest")
   .description("AI-driven VSCode extension E2E testing framework")
@@ -95,10 +110,13 @@ program
   .option("--output <dir>", "Output directory (default: ./test-results/<plan-name>)")
   .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
   .addOption(analysisModeOption())
+  .option("--logs", "Save per-run console, startup/error and component diagnostic logs")
+  .option("--no-logs", "Disable configured log output (does not disable analysis-mode evidence)")
+  .option("--log-output <dir>", "Enable logs and choose their directory (default: <output>/logs)")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install (overrides marketplace versions)")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields (e.g. --override extensionPath=../../vscode-java extension=redhat.java)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; analysisMode: AnalysisMode; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     try {
       const plan = loadTestPlan(planPath);
 
@@ -158,6 +176,7 @@ program
         outputDir,
         noLLM: opts.llm === false,
         analysisMode: opts.analysisMode,
+        logging: loggingOptions(opts),
       });
 
       // Ensure VSCode is closed even if the process is interrupted (Ctrl+C)
@@ -186,11 +205,14 @@ program
   .option("--output <dir>", "Output directory (default: ./test-results)")
   .option("--no-llm", "Skip LLM analysis")
   .addOption(analysisModeOption())
+  .option("--logs", "Save console and diagnostic logs for each plan")
+  .option("--no-logs", "Disable configured log output (does not disable analysis-mode evidence)")
+  .option("--log-output <dir>", "Enable logs under <dir>/<plan-name> (default: <output>/<plan-name>/logs)")
   .option("--exclude <plans>", "Comma-separated plan names to exclude", "java-fresh-import")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install for all plans")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields for all plans (e.g. --override extensionPath=../../vscode-java)")
-  .action(async (dir: string, opts: { output?: string; llm?: boolean; analysisMode: AnalysisMode; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (dir: string, opts: { output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     const planFiles = fs.readdirSync(dir)
       .filter(f => f.endsWith(".yaml") || f.endsWith(".yml"))
       .sort();
@@ -253,6 +275,7 @@ program
           outputDir,
           noLLM: opts.llm === false,
           analysisMode: opts.analysisMode,
+          logging: loggingOptions(opts, planName),
         });
 
         const cleanup = async () => {
