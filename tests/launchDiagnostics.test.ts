@@ -66,4 +66,27 @@ describe("opt-in launch diagnostics", () => {
     expect(output).not.toContain("unrelated-test-placeholder");
     expect(formatErrorEvidence("startup failed")).toContain("startup failed");
   });
+
+  it("preserves bounded aggregate connection errors when the outer message is empty", () => {
+    const connection = Object.assign(new Error("connect ECONNREFUSED api-key=aggregate-test-placeholder"), {
+      code: "ECONNREFUSED", syscall: "connect", address: "::1", port: 443,
+    });
+    const output = formatErrorEvidence(new AggregateError(Array(10).fill(connection), ""));
+    const details = JSON.parse(output);
+    expect(details.name).toBe("AggregateError");
+    expect(details.message).toBe("");
+    expect(details.errors).toHaveLength(8);
+    expect(details.errors[0]).toMatchObject({ code: "ECONNREFUSED", syscall: "connect", address: "::1", port: 443 });
+    expect(details.errorsTruncated).toBe(2);
+    expect(output).not.toContain("aggregate-test-placeholder");
+  });
+
+  it("bounds wide cyclic aggregate errors", () => {
+    const failure = new AggregateError([], "");
+    failure.errors.push(...Array(8).fill(failure));
+    const output = formatErrorEvidence(failure);
+    expect(output).toContain("<error entry limit>");
+    expect(output).toContain("<cause depth limit>");
+    expect(output.length).toBeLessThanOrEqual(64 * 1024);
+  });
 });

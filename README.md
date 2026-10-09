@@ -209,7 +209,7 @@ loaded only for these opt-in modes and is not part of the extension under test.
 
 Evidence modes also record timestamped startup stages in
 `evidence/logs/runner-launch.log`. A fatal startup error preserves its full stack,
-bounded cause chain and transport/status fields in `runner-failure.log`, even
+bounded cause chain, aggregate connection errors and transport/status fields in `runner-failure.log`, even
 when the exception's message is empty; both logs are referenced by the manifest.
 Failed-step and final probe snapshots include the active document's dirty flag,
 version, cursor position and bounded editor/disk excerpts. Disk comparison is

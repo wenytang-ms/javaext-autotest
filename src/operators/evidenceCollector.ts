@@ -87,17 +87,23 @@ export function sanitizeEvidence<T>(value: T): T {
 }
 
 export function formatErrorEvidence(error: unknown): string {
+  let remainingEntries = 32;
   function details(value: unknown, level: number): unknown {
     if (level > 4) return "<cause depth limit>";
-    if (!value || typeof value !== "object") return String(value);
+    if (remainingEntries-- <= 0) return "<error entry limit>";
+    if (!value || typeof value !== "object") return String(value).slice(0, 32_768);
     const record = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
-    for (const key of ["name", "message", "stack", "code", "statusCode", "status", "errno", "syscall", "hostname", "address", "port"]) {
+    for (const key of ["name", "message", "stack", "code", "statusCode", "status", "errno", "syscall", "hostname", "address", "port", "exitCode", "signal"]) {
       const entry = record[key];
       if (typeof entry === "string") result[key] = entry.slice(0, 32_768);
       else if (typeof entry === "number") result[key] = entry;
     }
     if (record.cause !== undefined) result.cause = details(record.cause, level + 1);
+    if (Array.isArray(record.errors)) {
+      result.errors = record.errors.slice(0, 8).map(entry => details(entry, level + 1));
+      if (record.errors.length > 8) result.errorsTruncated = record.errors.length - 8;
+    }
     return Object.keys(result).length ? result : { thrownValue: String(value) };
   }
   return JSON.stringify(sanitizeEvidence(details(error, 0)), null, 2).slice(0, MAX_LOG_TAIL_BYTES);
