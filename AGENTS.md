@@ -35,6 +35,7 @@ npx autotest validate test-plans/<plan>.yaml
 YAML Test Plan → PlanParser → TestRunner → ActionResolver → VscodeDriver (Playwright)
                                          → StepVerifier (deterministic checks)
                                          → EvidenceCollector + bundled probe (opt-in)
+                                         → ArtifactCollector (declared roots/globs, opt-in)
                                          → LLMClient (step, case, and matrix analysis)
 ```
 
@@ -46,6 +47,9 @@ YAML Test Plan → PlanParser → TestRunner → ActionResolver → VscodeDriver
   may add JDT LS logs and bundled JDT/Lombok versions.
 - **LLMClient** — Azure OpenAI for existing step screenshot checks, case-level pass
   audits/failure RCA, and matrix-level root-cause clustering.
+- **ArtifactCollector** — Generic full-file archives from consumer-declared roots
+  and globs. Collect after process shutdown and before workspace cleanup; defer
+  external writers with `phase: collect`. Never add product-specific paths here.
 
 ## Test Plan YAML Structure
 
@@ -390,6 +394,8 @@ Quote arguments that contain spaces. Both the view name and the action label are
 | `--analysis-mode <mode>` | `legacy` (default), `case`, or `evidence-only` |
 | `--logs` / `--no-logs` | Enable/disable configured per-run console and diagnostic files; does not change analysis mode |
 | `--log-output <dir>` | Enable logs in this directory (default: `<output>/logs`) |
+| `--artifacts-config <file>` | Shared defaults; plan overrides replace source arrays |
+| `--no-artifacts` | Disable generic collection without disabling logs or analysis |
 
 ### `autotest run-all <dir>`
 | Option | Description |
@@ -403,6 +409,21 @@ Quote arguments that contain spaces. Both the view name and the action label are
 | `--logs` / `--no-logs` | Enable/disable configured per-case log files |
 | `--log-output <dir>` | Enable separate logs under `<dir>/<plan-name>` |
 | `--exclude <plans>` | Comma-separated plan names to exclude |
+| `--artifacts-config <file>` | Shared artifact defaults, with separate archives per case |
+| `--no-artifacts` | Disable generic collection without disabling logs or analysis |
+
+### `autotest collect`
+
+Use `--output <case-dir>` and `--artifacts-config <file>` (or `--plan <file>`).
+Run it in CI `always()` after external writers stop. It reuses the generic
+collector, never clears output or rewrites results/evidence, validates existing
+archive hashes and adds new files. Source definitions are immutable per ID.
+Missing optional sources are visible; required missing files, size/count
+omissions and I/O failures return 1 independently of the original test exit.
+`modifiedSince: run-start` requires the persisted run start and must not collect
+historical reports when the run never began.
+See README's generic artifact schema; keep source selection in consumer config
+and setup/diagnostic production in the consumer workflow or fixture.
 
 ### `autotest analyze <dir>`
 | Option | Description |

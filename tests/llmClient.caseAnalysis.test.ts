@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LLMClient } from "../src/operators/llmClient.js";
-import type { CaseAnalysis, TestPlan, TestReport } from "../src/types.js";
+import type { ArtifactCollectionSummary, CaseAnalysis, TestPlan, TestReport } from "../src/types.js";
 
 beforeEach(() => {
   vi.stubEnv("AUTOTEST_CASE_ANALYSIS_MAX_TOKENS", undefined);
@@ -213,6 +213,45 @@ describe("LLMClient case and matrix analysis", () => {
     expect(prompt).toContain("verifyProblems");
     expect(prompt).toContain("03_ls-ready_verified.png");
     expect(prompt).toContain('"attempt": 1');
+  });
+
+  it("bounds artifact summaries and collection errors without changing the persisted evidence", async () => {
+    const fetchMock = mockCompletion("invalid case analysis");
+    const errors = Array.from({ length: 25 }, (_, index) => `error-${index}: ${"x".repeat(5_000)}`);
+    const summary: ArtifactCollectionSummary = {
+      manifest: "artifacts/manifest.json", status: "partial", files: 25, storedBytes: 500,
+      sources: Array.from({ length: 25 }, (_, index) => ({
+        id: `source-${index}`, status: "partial", files: 1, omittedFiles: 2,
+      })),
+      collectionErrors: errors,
+    };
+    const input = report("pass");
+    input.evidence!.artifactCollection = summary;
+    input.evidence!.collectionErrors = errors;
+    const client = new LLMClient({ endpoint: "https://example.test", apiKey: "test-key" });
+    await expect(client.analyzeCase({
+      plan, report: input,
+      evidenceManifest: {
+        schemaVersion: 1, generatedAt: input.endTime, planName: plan.name,
+        declaredVerdict: "passed", artifacts: [], artifactCollection: summary,
+        collectionErrors: errors,
+      },
+    })).rejects.toThrow();
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    const prompt: string = body.messages[1].content[0].text;
+    const payload = JSON.parse(prompt.slice(prompt.indexOf("\n\n") + 2));
+    for (const evidence of [payload.runtimeEvidence, payload.evidenceManifest.contents]) {
+      expect(evidence.collectionErrors).toHaveLength(20);
+      expect(evidence.collectionErrorsOmitted).toBe(5);
+      for (const error of evidence.collectionErrors) expect(error.length).toBeLessThan(2_100);
+      expect(evidence.artifactCollection.sources).toHaveLength(20);
+      expect(evidence.artifactCollection.sourceSummariesOmitted).toBe(5);
+      expect(evidence.artifactCollection.collectionErrors).toHaveLength(20);
+      expect(evidence.artifactCollection.collectionErrorsOmitted).toBe(5);
+    }
+    expect(summary.sources).toHaveLength(25);
+    expect(summary.collectionErrors).toEqual(errors);
+    expect(input.evidence!.collectionErrors).toEqual(errors);
   });
 
   it("sends the full scenario, execution evidence, logs, versions, and screenshots for failure RCA", async () => {

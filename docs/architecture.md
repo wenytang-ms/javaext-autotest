@@ -37,6 +37,10 @@ TestRunner
   |      - opt-in test-only probe
   |      - scenario, execution, diagnostics, logs, screenshots, environment
   |
+  +--> ArtifactCollector
+  |      - declared generic file roots and globs
+  |      - immutable archives, limits and separate collection manifest
+  |
   +--> LLMClient
          - existing per-step screenshot verification
          - opt-in case pass audit / failure RCA
@@ -73,6 +77,8 @@ src/
 │       └── verificationOperations.ts
 ├── operators/
 │   ├── actionResolver.ts
+│   ├── artifactCollector.ts
+│   ├── artifactConfig.ts
 │   ├── defaults.ts
 │   ├── evidenceCollector.ts
 │   ├── llmClient.ts
@@ -95,6 +101,7 @@ src/
 | `drivers/operations/*` | Implement grouped Driver operation methods | Access private Driver fields directly |
 | `StepVerifier` | Execute deterministic verification fields and decide pass/fail | Use LLM output as pass/fail authority |
 | `EvidenceCollector` | Build a bounded, redacted, framework-agnostic evidence bundle; host optional product-specific collectors | Decide pass/fail or infer root causes |
+| `ArtifactCollector` | Archive declared files into case output with safe paths, explicit limits/statuses and immutable hashes | Know extension IDs/log locations, execute setup commands, mutate test verdicts or embed full archives in prompts |
 | `LLMClient` | Verify screenshots, analyze a complete case, and summarize case analyses | Execute test steps or mutate the case verdict |
 
 ## Execution flow
@@ -125,6 +132,43 @@ After all steps, the runner follows the selected analysis mode:
 
 Case-level analysis is advisory and never changes step status, case verdict, or exit code.
 LLM/API errors are recorded under the optional `analysis.error` field.
+
+### Artifact lifecycle and compatibility
+
+Top-level `artifacts` is independent of logging and analysis. Strict config parsing
+resolves explicit paths relative to their plan/shared file; runtime roots are
+resolved from Driver state and environment roots read only the named variable.
+Shared config is a default, plan fields override it, SDK/CLI fields override both;
+source arrays replace and individual limit fields merge.
+
+The runner initializes output before logging, persists the run start, and shares
+one finalization promise between normal completion and signal cleanup. It captures
+the probe/environment while VS Code is still available, snapshots actual runtime
+directories, shuts down the owned process, archives files, then deletes the
+temporary workspace. `VscodeDriver.close({ beforeWorkspaceCleanup })` exposes that
+narrow lifecycle boundary; `close()` without arguments keeps existing behavior.
+Workspace cleanup runs in `finally` even if the callback fails. Actual user-data
+state is recorded as soon as CLI paths are resolved, before extension preparation.
+
+`phase: collect` sources defer external writers to the CLI `collect` command.
+That command reuses the collector without clearing output or editing results,
+evidence or case analysis. Existing archives are hash-validated and never replaced;
+new files supplement the separate `artifacts/manifest.json` index. Missing optional
+sources, deferred sources, platform skips, size/count omissions and I/O failures
+are visible. Collection status is separate from test status; no assertion, retry,
+LLM mode or original run exit policy changes. Hard kills cannot promise capture.
+
+Default limits are 1000 files, 50 MiB per source file and 200 MiB stored total.
+UTF-8 files are redacted in full; binary files need explicit configuration and
+never become LLM text. Directory links, destination escapes, collisions and
+framework-owned result paths are rejected. Archives retain root-relative paths.
+
+Generic mode bypasses legacy Java/JDT/bundled-JAR discovery. Consumers declare
+product paths themselves. Evidence selects text files round-robin across sources
+with independent limits (20 files, 64 KiB each, 256 KiB total), records omissions,
+and links the separate archive manifest. The full file index and contents are
+not serialized into case prompts. Legacy collection stays unchanged when generic
+artifacts are absent/disabled.
 
 ### Step and attempt evidence
 

@@ -11,10 +11,14 @@ import { execSync } from "node:child_process";
 import { VscodeDriver } from "../drivers/vscodeDriver.js";
 import type {
   AnalysisMode,
+  ArtifactCollectionSummary,
+  ArtifactCollectionManifest,
+  ArtifactOptions,
   CaseAnalysis,
   EvidenceBundleManifest,
   LoggingOptions,
   RepoClone,
+  RunEvidence,
   StepAttemptResult,
   StepResult,
   StepScreenshot,
@@ -24,6 +28,8 @@ import type {
   VerificationEvidence,
 } from "../types.js";
 import { ActionResolver } from "./actionResolver.js";
+import { ArtifactCollector, summarizeArtifacts, type ArtifactRuntimePaths } from "./artifactCollector.js";
+import { loadArtifactConfig, mergeArtifactOptions, parseArtifactOptions } from "./artifactConfig.js";
 import { EvidenceCollector, formatErrorEvidence, sanitizeEvidence } from "./evidenceCollector.js";
 import { parseLoggingOptions, withRunLogging } from "./runLogging.js";
 import { LLMClient, type CaseScreenshot } from "./llmClient.js";
@@ -39,6 +45,10 @@ export interface TestRunnerOptions {
   analysisMode?: AnalysisMode;
   /** Optional per-run console and diagnostic log output. Overrides YAML logging fields. */
   logging?: LoggingOptions;
+  /** Shared artifact defaults. Paths in this file are relative to the file. */
+  artifactsConfig?: string;
+  /** Overrides shared defaults and plan fields. Source arrays replace rather than concatenate. */
+  artifacts?: ArtifactOptions;
 }
 
 export class TestRunner {
@@ -54,6 +64,10 @@ export class TestRunner {
   private outputDir: string | null;
   private screenshotDir: string | null;
   private screenshotCounter = 0;
+  private artifactOptions: ArtifactOptions | undefined;
+  private artifactCollector: ArtifactCollector | null = null;
+  private artifactSummary: ArtifactCollectionSummary | undefined;
+  private finalization: Promise<RunEvidence | undefined> | null = null;
 
   constructor(plan: TestPlan, options: TestRunnerOptions = {}) {
     this.plan = plan;
@@ -61,6 +75,13 @@ export class TestRunner {
     this.screenshotDir = this.outputDir ? path.join(this.outputDir, "screenshots") : null;
     this.analysisMode = options.analysisMode ?? "legacy";
     const evidenceEnabled = this.analysisMode !== "legacy";
+    const artifacts = mergeArtifactOptions(
+      options.artifactsConfig === undefined ? undefined : loadArtifactConfig(options.artifactsConfig),
+      parseArtifactOptions(plan.artifacts),
+      parseArtifactOptions(options.artifacts),
+    );
+    this.artifactOptions = artifacts?.enabled === false ? undefined : artifacts;
+    if (this.artifactOptions && !this.outputDir) throw new Error("Artifact collection requires a case outputDir");
     const logging = parseLoggingOptions(options.logging
       ? { ...plan.logging, ...options.logging } : plan.logging);
     this.logDirectory = logging && logging.enabled !== false
@@ -95,10 +116,10 @@ export class TestRunner {
 
     this.verifier = new StepVerifier(this.driver);
     this.evidenceCollector = evidenceEnabled
-      ? new EvidenceCollector(this.driver, this.outputDir, this.logDirectory)
+      ? new EvidenceCollector(this.driver, this.outputDir, this.logDirectory, this.artifactOptions !== undefined)
       : null;
     this.diagnosticCollector = this.logDirectory
-      ? this.evidenceCollector ?? new EvidenceCollector(this.driver, null, this.logDirectory)
+      ? this.evidenceCollector ?? new EvidenceCollector(this.driver, null, this.logDirectory, this.artifactOptions !== undefined)
       : null;
     this.llm = options.noLLM || this.analysisMode === "evidence-only"
       ? null
@@ -107,13 +128,18 @@ export class TestRunner {
 
   /** Force-close the VSCode instance (for signal handlers) */
   async cleanup(): Promise<void> {
-    await this.driver.close();
+    if (this.artifactCollector) await this.finalize();
+    else await this.driver.close();
   }
 
   async run(): Promise<TestReport> {
     const startTime = new Date();
     this.diagnosticCollector?.resetRunnerFailure();
     this.prepareOutputDir();
+    this.finalization = null;
+    this.artifactSummary = undefined;
+    this.artifactCollector = this.artifactOptions ? new ArtifactCollector(this.outputDir!, this.artifactOptions) : null;
+    this.artifactCollector?.beginRun(startTime, this.plan.name);
     const run = () => this.runPrepared(startTime);
     return this.logDirectory ? withRunLogging(this.logDirectory, run) : run();
   }
@@ -146,28 +172,7 @@ export class TestRunner {
       crashed = true;
       crashReason = errorMsg;
     } finally {
-      const collector = this.evidenceCollector ?? this.diagnosticCollector;
-      if (collector) {
-        const collectionErrors: string[] = [];
-        try {
-          await this.driver.refreshProbeSnapshot();
-        } catch (e) {
-          collectionErrors.push(`Probe refresh failed: ${(e as Error).message}`);
-        }
-        try {
-          const collected = collector.collectRunEvidence(collectionErrors);
-          if (this.evidenceCollector) runEvidence = collected;
-          if (this.logDirectory) {
-            fs.writeFileSync(
-              path.join(this.logDirectory, "environment.json"),
-              JSON.stringify(sanitizeEvidence(collected), null, 2),
-            );
-          }
-        } catch (e) {
-          console.warn(`⚠️  Could not collect run evidence: ${(e as Error).message}`);
-        }
-      }
-      await this.driver.close();
+      runEvidence = await this.finalize();
     }
 
     const endTime = new Date();
@@ -202,6 +207,7 @@ export class TestRunner {
       ...(crashed ? { crashed: true, crashReason } : {}),
       summary,
       ...(runEvidence ? { evidence: runEvidence } : {}),
+      ...(this.artifactSummary ? { artifacts: this.artifactSummary } : {}),
     };
 
     this.writeReport(report);
@@ -256,6 +262,95 @@ export class TestRunner {
       }
     }
     return report;
+  }
+
+  private finalize(): Promise<RunEvidence | undefined> {
+    return this.finalization ??= this.finalizeRun();
+  }
+
+  private async finalizeRun(): Promise<RunEvidence | undefined> {
+    const collector = this.evidenceCollector ?? this.diagnosticCollector;
+    const collectionErrors: string[] = [];
+    let evidence: RunEvidence | undefined;
+    if (collector) {
+      try {
+        await this.driver.refreshProbeSnapshot();
+      } catch (error) {
+        collectionErrors.push(`Probe refresh failed: ${(error as Error).message}`);
+      }
+      try {
+        evidence = collector.collectRunEvidence(collectionErrors);
+        this.writeDiagnosticEnvironment(evidence);
+      } catch (error) {
+        const message = `Could not collect run evidence: ${(error as Error).message}`;
+        collectionErrors.push(message);
+        console.warn(`⚠️  ${message}`);
+      }
+    }
+    if (!this.artifactCollector) {
+      await this.driver.close();
+      return this.evidenceCollector ? evidence : undefined;
+    }
+
+    const runtimePaths: ArtifactRuntimePaths = { userData: this.driver.getUserDataDir() };
+    try {
+      const workspace = this.driver.getWorkspacePath();
+      runtimePaths.workspace = workspace && fs.existsSync(workspace) && fs.statSync(workspace).isFile()
+        ? path.dirname(workspace) : workspace;
+    } catch (error) {
+      const message = `Could not resolve runtime workspace: ${(error as Error).message}`;
+      collectionErrors.push(message);
+      console.warn(`⚠️  ${message}`);
+    }
+    await this.driver.close({
+      beforeWorkspaceCleanup: () => {
+        let manifest: ArtifactCollectionManifest | undefined;
+        try {
+          manifest = this.artifactCollector!.collect(runtimePaths, "run");
+          this.artifactSummary = summarizeArtifacts(manifest);
+          for (const source of manifest.sources) {
+            if (source.status === "missing") console.warn(`⚠️  Artifact source ${source.id}: ${source.reason}`);
+          }
+          for (const message of this.artifactSummary.collectionErrors ?? []) console.warn(`⚠️  ${message}`);
+        } catch (error) {
+          const message = `Artifact finalization failed: ${(error as Error).message}`;
+          collectionErrors.push(message);
+          console.warn(`⚠️  ${message}`);
+          this.artifactSummary = {
+            ...this.artifactCollector!.getSummary(), status: "failed",
+            collectionErrors: [...(this.artifactCollector!.getSummary().collectionErrors ?? []), message],
+          };
+        }
+        if (manifest && evidence && collector && this.artifactSummary) {
+          try {
+            collector.attachArtifacts(evidence, manifest, this.artifactSummary, this.outputDir!);
+            this.writeDiagnosticEnvironment(evidence);
+          } catch (error) {
+            const message = `Artifact evidence failed: ${(error as Error).message}`;
+            collectionErrors.push(message);
+            console.warn(`⚠️  ${message}`);
+          }
+        }
+      },
+    });
+    if (this.artifactSummary && collectionErrors.length) {
+      this.artifactSummary.collectionErrors = [
+        ...new Set([...(this.artifactSummary.collectionErrors ?? []), ...collectionErrors]),
+      ];
+    }
+    if (evidence && collectionErrors.length) {
+      evidence.collectionErrors = [...new Set([...(evidence.collectionErrors ?? []), ...collectionErrors])];
+    }
+    return this.evidenceCollector ? evidence : undefined;
+  }
+
+  private writeDiagnosticEnvironment(evidence: RunEvidence): void {
+    if (this.logDirectory) {
+      fs.writeFileSync(
+        path.join(this.logDirectory, "environment.json"),
+        JSON.stringify(sanitizeEvidence(evidence), null, 2),
+      );
+    }
   }
 
   /** Clean and create the output / screenshots directory tree. */

@@ -4,4 +4,6 @@ export { ActionResolver } from "./operators/actionResolver.js";
 export { StepVerifier } from "./operators/stepVerifier.js";
 export { LLMClient, type LLMClientOptions, type StepVerificationContext } from "./operators/llmClient.js";
 export { TestRunner, type TestRunnerOptions } from "./operators/testRunner.js";
+export { ArtifactCollector, summarizeArtifacts, type ArtifactRuntimePaths } from "./operators/artifactCollector.js";
+export { loadArtifactConfig, parseArtifactOptions, mergeArtifactOptions } from "./operators/artifactConfig.js";
 export type * from "./types.js";

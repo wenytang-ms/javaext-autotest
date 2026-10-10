@@ -8,6 +8,7 @@ export interface TestPlan {
   name: string;
   description?: string;
   logging?: LoggingOptions;
+  artifacts?: ArtifactOptions;
   setup: TestSetup;
   steps: TestStep[];
 }
@@ -17,6 +18,80 @@ export interface LoggingOptions {
   enabled?: boolean;
   /** Log directory. YAML paths are relative to the plan; SDK paths are relative to cwd. */
   outputDir?: string;
+}
+
+export type ArtifactRuntimeRoot = "workspace" | "userData" | "output";
+export type ArtifactRoot = ArtifactRuntimeRoot | { path: string } | { env: string; path?: string };
+
+export interface ArtifactSource {
+  id: string;
+  root: ArtifactRoot;
+  include: string[];
+  exclude?: string[];
+  /** Directory inside the case output. Root-relative source paths are preserved. */
+  destination: string;
+  /** Default: run. Use collect for files whose producer outlives the runner. */
+  phase?: "run" | "collect";
+  platforms?: Array<"win32" | "linux" | "darwin">;
+  optional?: boolean;
+  /** Only select files modified since the run started. Requires a recorded run start. */
+  modifiedSince?: "run-start";
+  /** Text is UTF-8 and redacted. Binary files require explicit opt-in and are never LLM input. */
+  format?: "text" | "binary";
+  evidence?: "none" | "tail";
+}
+
+export interface ArtifactOptions {
+  /** Opt-in; defaults to true when configured. */
+  enabled?: boolean;
+  sources?: ArtifactSource[];
+  limits?: {
+    maxFiles?: number;
+    maxFileBytes?: number;
+    maxTotalBytes?: number;
+  };
+}
+
+export interface CollectedArtifactFile {
+  sourcePath: string;
+  path: string;
+  sizeBytes: number;
+  storedBytes: number;
+  sha256: string;
+  format: "text" | "binary";
+  redacted: boolean;
+  evidence?: "tail";
+}
+
+export interface ArtifactSourceResult {
+  id: string;
+  configHash: string;
+  status: "collected" | "missing" | "deferred" | "skipped" | "partial" | "error";
+  optional?: boolean;
+  reason?: string;
+  files: CollectedArtifactFile[];
+  matchedFiles: number;
+  omittedFiles: number;
+  errors: string[];
+  errorsTruncated?: number;
+}
+
+export interface ArtifactCollectionManifest {
+  schemaVersion: 1;
+  generatedAt: string;
+  runStartedAt?: string;
+  planName?: string;
+  status: "complete" | "partial" | "failed";
+  sources: ArtifactSourceResult[];
+}
+
+export interface ArtifactCollectionSummary {
+  manifest: string;
+  status: ArtifactCollectionManifest["status"];
+  files: number;
+  storedBytes: number;
+  sources: Array<Pick<ArtifactSourceResult, "id" | "status" | "omittedFiles"> & { files: number }>;
+  collectionErrors?: string[];
 }
 
 export interface TestSetup {
@@ -324,6 +399,7 @@ export interface EvidenceLog {
   artifactPath?: string;
   sizeBytes: number;
   tail: string;
+  tailTruncated?: boolean;
 }
 
 export interface RunEvidence {
@@ -345,6 +421,8 @@ export interface RunEvidence {
   bundledArtifacts: string[];
   logs: EvidenceLog[];
   signatures: string[];
+  artifactCollection?: ArtifactCollectionSummary;
+  artifactEvidenceOmitted?: number;
 }
 
 export type AnalysisMode = "legacy" | "case" | "evidence-only";
@@ -366,6 +444,7 @@ export interface EvidenceBundleManifest {
   declaredVerdict: "passed" | "failed" | "crashed";
   artifacts: EvidenceArtifact[];
   collectionErrors?: string[];
+  artifactCollection?: ArtifactCollectionSummary;
 }
 
 export interface AnalysisEvidenceCitation {
@@ -531,6 +610,7 @@ export interface TestReport {
     errors: number;
   };
   evidence?: RunEvidence;
+  artifacts?: ArtifactCollectionSummary;
   analysis?: TestAnalysis;
   /** LLM-generated analysis of the overall test run (populated by aggregate analysis) */
   llmAnalysis?: string;

@@ -5,6 +5,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
+  ArtifactCollectionManifest,
+  ArtifactCollectionSummary,
   Diagnostic,
   EvidenceArtifact,
   EvidenceBundleManifest,
@@ -207,9 +209,9 @@ function normalizeSignature(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, MAX_SIGNATURE_LENGTH);
 }
 
-export function extractFailureSignatures(texts: string[]): string[] {
+export function extractFailureSignatures(texts: string[], generic = false): string[] {
   const signatures = new Set<string>();
-  const patterns = [
+  const patterns = generic ? [/[\w.$]*(?:Error|Exception):[^\r\n]*/g] : [
     /Lombok can't parse this source:[^\r\n]*/gi,
     /(?:java\.)?[\w.$]*(?:Error|Exception):[^\r\n]*/g,
     /Internal compiler error:[^\r\n]*/gi,
@@ -234,6 +236,7 @@ export class EvidenceCollector {
     private readonly driver: VscodeDriver,
     private readonly outputDir: string | null,
     private readonly logDirectory?: string | null,
+    private readonly genericArtifacts = false,
   ) {}
 
   recordRunnerFailure(error: unknown): void {
@@ -285,7 +288,7 @@ export class EvidenceCollector {
       signatures: extractFailureSignatures([
         ...diagnostics.map((diagnostic) => diagnostic.message),
         ...visibleProblems.map((diagnostic) => diagnostic.message),
-      ]),
+      ], this.genericArtifacts),
     });
 
     if (this.outputDir) {
@@ -316,18 +319,18 @@ export class EvidenceCollector {
       collectionErrors.push(`Probe snapshot is unavailable or invalid${probePath ? `: ${probePath}` : ""}`);
     }
     const logs = [
-      ...this.collectJdtLogs(userDataDir),
-      ...this.collectVscodeLogs(userDataDir, collectionErrors),
+      ...(this.genericArtifacts ? [] : this.collectJdtLogs(userDataDir)),
+      ...(this.genericArtifacts ? [] : this.collectVscodeLogs(userDataDir, collectionErrors)),
       ...this.collectRunnerLogs(),
     ];
     const installedExtensions = probe?.extensions?.length
       ? probe.extensions
       : collectInstalledExtensions(extensionsDir);
-    const bundledArtifacts = collectBundledArtifacts(extensionsDir);
+    const bundledArtifacts = this.genericArtifacts ? [] : collectBundledArtifacts(extensionsDir);
     const signatures = extractFailureSignatures([
       ...(probe?.diagnostics.map((diagnostic) => diagnostic.message) ?? []),
       ...logs.map((log) => log.tail),
-    ]);
+    ], this.genericArtifacts);
 
     const evidence = sanitizeEvidence<RunEvidence>({
       capturedAt: new Date().toISOString(),
@@ -338,8 +341,7 @@ export class EvidenceCollector {
         platform: os.platform(),
         arch: os.arch(),
         nodeVersion: process.version,
-        javaHome: process.env.JAVA_HOME,
-        javaVersion: readJavaVersion(),
+        ...(this.genericArtifacts ? {} : { javaHome: process.env.JAVA_HOME, javaVersion: readJavaVersion() }),
         autoTestVersion: readAutoTestVersion(),
         githubRunId: process.env.GITHUB_RUN_ID,
         githubJob: process.env.GITHUB_JOB,
@@ -361,6 +363,55 @@ export class EvidenceCollector {
       }
     }
     return evidence;
+  }
+
+  attachArtifacts(
+    evidence: RunEvidence,
+    manifest: ArtifactCollectionManifest,
+    summary: ArtifactCollectionSummary,
+    caseOutputDir: string,
+  ): void {
+    const queues = manifest.sources.map(source =>
+      source.files.filter(file => file.evidence === "tail" && file.format === "text")
+        .map(file => ({ sourceId: source.id, file })),
+    );
+    const files: Array<(typeof queues)[number][number]> = [];
+    const longestQueue = queues.reduce((max, queue) => Math.max(max, queue.length), 0);
+    for (let index = 0; index < longestQueue; index++) {
+      for (const queue of queues) if (queue[index]) files.push(queue[index]);
+    }
+    const logs: EvidenceLog[] = [];
+    let remainingBytes = 256 * 1024;
+    for (const { sourceId, file } of files) {
+      if (logs.length >= 20 || remainingBytes <= 0) break;
+      try {
+        const length = Math.min(file.storedBytes, MAX_LOG_TAIL_BYTES, remainingBytes);
+        let tail = readFileRange(path.join(caseOutputDir, file.path), file.storedBytes - length, length);
+        while (Buffer.byteLength(tail) > length) tail = tail.slice((tail.codePointAt(0) ?? 0) > 0xffff ? 2 : 1);
+        remainingBytes -= Buffer.byteLength(tail);
+        logs.push({
+          kind: sourceId, sourcePath: file.sourcePath, artifactPath: file.path,
+          sizeBytes: file.sizeBytes, tail,
+          ...(length < file.storedBytes ? { tailTruncated: true } : {}),
+        });
+      } catch (error) {
+        evidence.collectionErrors = [
+          ...(evidence.collectionErrors ?? []),
+          `Artifact evidence failed (${file.path}): ${(error as Error).message}`,
+        ];
+      }
+    }
+    evidence.logs.push(...logs);
+    evidence.artifactCollection = summary;
+    if (files.length > logs.length) evidence.artifactEvidenceOmitted = files.length - logs.length;
+    evidence.collectionErrors = [...new Set([
+      ...(evidence.collectionErrors ?? []), ...(summary.collectionErrors ?? []),
+    ])];
+    if (!evidence.collectionErrors.length) delete evidence.collectionErrors;
+    evidence.signatures = [...new Set([
+      ...evidence.signatures, ...extractFailureSignatures(logs.map(log => log.tail), this.genericArtifacts),
+    ])];
+    if (this.outputDir) writeEvidenceJson(path.join(this.outputDir, "evidence", "environment.json"), evidence);
   }
 
   writeBundle(
@@ -464,6 +515,7 @@ export class EvidenceCollector {
       ...(collectionErrors.length > 0
         ? { collectionErrors: [...new Set(collectionErrors)] }
         : {}),
+      ...(runEvidence?.artifactCollection ? { artifactCollection: runEvidence.artifactCollection } : {}),
     };
     const manifestPath = path.join(evidenceDir, "manifest.json");
     writeEvidenceJson(manifestPath, manifest);

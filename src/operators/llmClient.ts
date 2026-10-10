@@ -253,11 +253,28 @@ function compactEvidence(evidence: FailureEvidence | undefined) {
   };
 }
 
+function compactCollectionErrors(errors: string[] | undefined) {
+  return errors ? {
+    collectionErrors: errors.slice(0, 20).map(error => limitText(error, 2_000)),
+    ...(errors.length > 20 ? { collectionErrorsOmitted: errors.length - 20 } : {}),
+  } : {};
+}
+
+function compactArtifactSummary(summary: NonNullable<RunEvidence["artifactCollection"]>) {
+  return {
+    ...summary,
+    sources: summary.sources.slice(0, 20),
+    ...(summary.sources.length > 20 ? { sourceSummariesOmitted: summary.sources.length - 20 } : {}),
+    ...compactCollectionErrors(summary.collectionErrors),
+  };
+}
+
 function compactRunEvidence(evidence: RunEvidence | undefined): unknown {
   if (!evidence) return undefined;
   return {
     capturedAt: evidence.capturedAt,
     collectionErrors: evidence.collectionErrors,
+    ...(evidence.artifactCollection ? compactCollectionErrors(evidence.collectionErrors) : {}),
     environment: evidence.environment,
     installedExtensions: evidence.installedExtensions,
     bundledArtifacts: evidence.bundledArtifacts,
@@ -268,7 +285,10 @@ function compactRunEvidence(evidence: RunEvidence | undefined): unknown {
       artifactPath: log.artifactPath,
       sizeBytes: log.sizeBytes,
       tail: limitText(log.tail, 32_000),
+      ...(log.tailTruncated ? { tailTruncated: true } : {}),
     })),
+    ...(evidence.artifactCollection ? { artifactCollection: compactArtifactSummary(evidence.artifactCollection) } : {}),
+    ...(evidence.artifactEvidenceOmitted ? { artifactEvidenceOmitted: evidence.artifactEvidenceOmitted } : {}),
   };
 }
 
@@ -463,7 +483,13 @@ it. Missing or truncated evidence is a limitation, not proof of success or failu
     const payload = {
       evidenceManifest: {
         path: input.evidenceManifestPath,
-        contents: input.evidenceManifest,
+        contents: input.evidenceManifest?.artifactCollection
+          ? {
+            ...input.evidenceManifest,
+            ...compactCollectionErrors(input.evidenceManifest.collectionErrors),
+            artifactCollection: compactArtifactSummary(input.evidenceManifest.artifactCollection),
+          }
+          : input.evidenceManifest,
       },
       declaredVerdict: failed ? "failed" : "passed",
       scenario: input.plan,

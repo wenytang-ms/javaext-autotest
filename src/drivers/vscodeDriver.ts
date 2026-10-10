@@ -149,6 +149,8 @@ export class VscodeDriver {
     const [cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
 
     const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(this.getTemporaryDirectory(), "autotest-"));
+    const actualUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1] ?? userDataDir;
+    this.actualUserDataDir = actualUserDataDir;
     const extensionsDir = baseArgs.find(a => a.startsWith("--extensions-dir="))?.split("=")[1];
     this.actualExtensionsDir = extensionsDir ?? null;
     const bundledProbePath = this.options.enableEvidenceProbe
@@ -321,7 +323,6 @@ export class VscodeDriver {
     }
 
     // Inject settings.json into the ACTUAL user data dir that VSCode will use (from baseArgs)
-    const actualUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1] ?? userDataDir;
     this.recordLaunchDiagnostic("write-settings", { userDataDir: actualUserDataDir });
     this.probeSnapshotPath = this.options.enableEvidenceProbe
       ? path.join(actualUserDataDir, "User", "autotest-probe.json")
@@ -356,9 +357,6 @@ export class VscodeDriver {
     };
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
-    // Track the user data dir so executeVSCodeCommand can rewrite keybindings.json
-    // at runtime to register on-the-fly bindings for command-id dispatch.
-    this.actualUserDataDir = actualUserDataDir;
     // Start each session with an empty keybindings.json so VS Code does not
     // pick up stale bindings from a previous run that shared this dir.
     const keybindingsPath = path.join(actualUserDataDir, "User", "keybindings.json");
@@ -509,7 +507,16 @@ export class VscodeDriver {
     }
   }
 
-  async close(): Promise<void> {
+  async close(options: { beforeWorkspaceCleanup?: () => void | Promise<void> } = {}): Promise<void> {
+    await this.closeApplication();
+    try {
+      await options.beforeWorkspaceCleanup?.();
+    } finally {
+      await this.cleanupWorkspace();
+    }
+  }
+
+  private async closeApplication(): Promise<void> {
     const pid = this.launchedPid;
     if (this.app) {
       try {
@@ -538,6 +545,9 @@ export class VscodeDriver {
         // Process already exited — good
       }
     }
+  }
+
+  private async cleanupWorkspace(): Promise<void> {
     // Clean up git worktree
     if (this.worktreeRoot) {
       const wt = this.worktreeRoot;

@@ -99,6 +99,147 @@ console captures are isolated even when they share a Node process. Invalid
 configuration or a console-log write failure is reported explicitly; a logging
 failure does not rewrite the saved test verdict.
 
+### Generic artifact collection
+
+Artifact collection is a separate opt-in feature. `logging` saves AutoTest's own
+output; `artifacts` archives explicitly selected files; `evidence: tail` supplies
+bounded excerpts to the existing analysis pipeline. AutoTest does not need to
+know an extension ID, language-server directory or external tool.
+
+Put shared defaults in an `artifacts` section in a YAML/JSON file, for example
+`ci-artifacts.yaml`. The same section is supported directly in a test plan:
+
+```yaml
+artifacts:
+  enabled: true
+  limits:
+    maxFiles: 1000
+    maxFileBytes: 52428800
+    maxTotalBytes: 209715200
+  sources:
+    - id: ide
+      root: userData
+      include: ['logs\**\*']
+      destination: logs\ide
+      evidence: tail
+    - id: diagnostics
+      root: workspace
+      include: ['.autotest\**\*.log', '.autotest\**\*.json']
+      destination: diagnostics\workspace
+      optional: true
+      evidence: tail
+    - id: preparation
+      root: {env: AUTOTEST_STAGING_DIR}
+      include: ['*-version.log', '*.json']
+      destination: diagnostics\ci
+      optional: true
+    - id: console
+      root: {env: AUTOTEST_STAGING_DIR}
+      include: ['console.log']
+      destination: logs\console
+      phase: collect
+      optional: true
+    - id: native-reports
+      root: {env: HOME, path: 'Library\Logs\DiagnosticReports'}
+      include: ['*.ips', '*.crash']
+      destination: logs\crashes
+      platforms: [darwin]
+      modifiedSince: run-start
+      phase: collect
+      optional: true
+```
+
+```powershell
+autotest run test-plans\example.yaml --output test-results\example --logs --artifacts-config ci-artifacts.yaml --analysis-mode case
+
+# Run in the CI always() step, after external log writers have closed.
+autotest collect --output test-results\example --artifacts-config ci-artifacts.yaml
+```
+
+`run-all --artifacts-config ci-artifacts.yaml` applies the same defaults to every
+case, with separate archives under `<output>/<plan-name>`. Precedence is shared
+file defaults, then plan fields, then SDK/CLI overrides. Source arrays replace
+the previous array, including `[]`; they never concatenate. Limit fields merge
+individually. `--no-artifacts` disables collection without disabling logging or
+analysis. If a plan overrides artifact settings, pass that same plan with
+`collect --plan test-plans\example.yaml` so collection uses the same definitions.
+
+| Field | Behavior |
+|-------|----------|
+| `root: workspace` | Actual isolated workspace, not the original fixture; single-file runs use its containing directory |
+| `root: userData` | Actual VS Code user-data directory, including paths known before an early launch failure |
+| `root: output` | Case output; collector-owned archive trees and its index are excluded from traversal |
+| `root: {path: ...}` | Explicit directory; relative paths use the plan/shared-file directory, or cwd for SDK options |
+| `root: {env: NAME, path: ...}` | Resolve one named environment variable at collection time; optional `path` is a safe relative subdirectory |
+| `include` / `exclude` | Root-relative globs; `/` and `\` separators, `**`, braces and hidden files are supported |
+| `destination` | Safe directory inside the case output; the complete root-relative source path is preserved |
+| `phase: run` | Default: archive after VS Code shutdown, before temporary workspace deletion |
+| `phase: collect` | Defer until the explicit post-run command; useful for console, display and other external writers |
+| `platforms` | Optional list of `win32`, `linux`, `darwin`; other platforms are visibly skipped |
+| `optional: true` | Missing directory or no matching files is recorded but not a collection failure |
+| `modifiedSince: run-start` | Select only files modified since the persisted run start; without one, record the source as unavailable rather than include historical files |
+| `format: text` | Default: complete UTF-8 file, with the existing secret/user-path redaction; invalid UTF-8 or NUL bytes are an explicit error |
+| `format: binary` | Explicit unmodified binary archive; no redaction or LLM input, so only select safe files |
+| `evidence: tail` | Include a bounded text tail in case/evidence-only modes or configured diagnostic logs; default is `none` |
+
+Source IDs must be unique; source destination trees must not overlap. Traversal,
+symlink/junction escapes, framework-owned result paths and overwriting unowned
+files are rejected. Only declared roots are inspected: the collector does not
+dump the environment, scan home directories automatically or run setup commands.
+CI/fixtures still install tools and generate version/diagnostic files; GitHub
+Actions still uploads the final case directory.
+
+The default limits are the values shown above. `maxFiles` and `maxTotalBytes`
+include already archived files. `maxFileBytes` bounds source reads; oversized
+files are omitted, never silently truncated. `artifacts/manifest.json` records
+each source's status, missing/deferred sources, omission counts, errors, original
+and stored sizes, SHA-256 hashes, redaction and output-relative file references.
+Error details are bounded with explicit `errorsTruncated` counts.
+
+`collect` creates output if necessary but never clears it, overwrites existing
+archives, edits `results.json` or updates saved case analysis. Repeated calls
+validate existing hashes and add only new files. Already archived runtime sources
+remain usable after their workspace disappears, with previous errors and
+omissions preserved if the source cannot be rechecked. A changed source definition
+requires a new ID. `collect` exits 1 for an incomplete/failed collection, separately
+from the original test exit code. `run` records optional `report.artifacts`
+metadata without changing its test verdict or exit policy.
+
+Output is initialized once before opening the runner logger. Keep pre-run and
+externally redirected console files outside `--output`, for example in
+`AUTOTEST_STAGING_DIR`, because startup still clears case output. Probe capture
+precedes shutdown; artifact archival follows shutdown and precedes workspace
+cleanup. Signal cleanup shares the same idempotent finalization. A hard kill,
+runner loss or reports generated after the final collect cannot guarantee full
+in-process capture; available external files can still be collected/uploaded.
+
+In this opt-in mode, legacy automatic Java/JDT/bundled-JAR discovery is disabled.
+Declare product-specific paths in consumer configuration instead. Existing YAML,
+logging flags, Java evidence adapters and report defaults remain unchanged when
+`artifacts` is absent or disabled.
+
+Full archives do not inflate LLM prompts. Text evidence selects files round-robin
+across declared sources, at most 20 files / 64 KiB per file / 256 KiB total.
+`tailTruncated` and `artifactEvidenceOmitted` expose evidence bounds. The evidence
+manifest links to the separate artifact index and selected logs, rather than
+embedding all files. LLM source/error summaries are also bounded, with omission
+counts; the persisted manifest remains complete. Passing-case audits, failed-case RCA and matrix summaries
+retain their existing behavior.
+
+```typescript
+import { loadTestPlan, TestRunner, ArtifactCollector, loadArtifactConfig } from "@vscjava/vscode-autotest";
+
+const runner = new TestRunner(loadTestPlan("test-plans/example.yaml"), {
+  outputDir: "test-results/example",
+  artifactsConfig: "ci-artifacts.yaml",
+  // artifacts: { enabled: false } overrides shared and plan settings.
+});
+await runner.run();
+
+// The same incremental collector used by the post-run CLI.
+new ArtifactCollector("test-results/example", loadArtifactConfig("ci-artifacts.yaml")).collect();
+```
+
 ### Requirements
 
 - Node.js >= 22
@@ -264,7 +405,9 @@ The default `legacy` mode keeps the existing report and screenshot behavior unch
 evidence bundle under `evidence/`. A bundled test-only probe reads diagnostics through
 `vscode.languages.getDiagnostics()` and records extension/runtime metadata. The Node
 collector adds bounded, secret-redacted logs and component metadata; Java runs currently
-include an optional adapter for JDT LS logs and bundled JDT/Lombok artifacts. The probe is
+include a legacy optional adapter for JDT LS logs and bundled JDT/Lombok artifacts.
+With generic `artifacts` enabled, only explicitly declared product files are collected.
+The probe is
 loaded only for these opt-in modes and is not part of the extension under test.
 
 In `case` and `evidence-only` modes, each step and retry attempt also records:
@@ -475,6 +618,7 @@ See [AGENTS.md](AGENTS.md).
 | `npx autotest run-all <dir>` | Run all `.yaml/.yml` test plans in a directory and generate `summary.md` |
 | `npx autotest analyze <dir>` | Scan existing `results.json` files and regenerate summary / LLM analysis |
 | `npx autotest validate <plan>` | Validate YAML test plan format |
+| `npx autotest collect --output <case-dir> --artifacts-config <file>` | Incrementally archive available declared files without editing test results |
 
 Common options:
 
@@ -487,6 +631,9 @@ Common options:
 | `--vsix <paths>` | `run` / `run-all` | Comma-separated VSIX paths appended to `setup.vsix` |
 | `--override <kv...>` | `run` / `run-all` | Override `setup` fields, for example `--override extensionPath=../../vscode-java` |
 | `--exclude <plans>` | `run-all` | Comma-separated plan names; defaults to excluding `java-fresh-import` |
+| `--artifacts-config <file>` | `run` / `run-all` / `collect` | Shared artifact defaults; plan fields override defaults |
+| `--no-artifacts` | `run` / `run-all` | Disable artifact collection independently of logging and analysis |
+| `--plan <file>` | `collect` | Use the plan's artifact overrides, or its standalone artifact settings |
 
 ---
 

@@ -12,6 +12,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { loadTestPlan, validateTestPlanFile } from "../operators/planParser.js";
 import { TestRunner } from "../operators/testRunner.js";
+import { ArtifactCollector, summarizeArtifacts } from "../operators/artifactCollector.js";
+import { loadArtifactConfig, mergeArtifactOptions } from "../operators/artifactConfig.js";
 import type { AnalysisMode, LoggingOptions } from "../types.js";
 import { generateSummary } from "./summary.js";
 
@@ -113,10 +115,12 @@ program
   .option("--logs", "Save per-run console, startup/error and component diagnostic logs")
   .option("--no-logs", "Disable configured log output (does not disable analysis-mode evidence)")
   .option("--log-output <dir>", "Enable logs and choose their directory (default: <output>/logs)")
+  .option("--artifacts-config <file>", "Shared artifact defaults (plan fields override defaults)")
+  .option("--no-artifacts", "Disable configured artifact collection without changing logging or analysis")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install (overrides marketplace versions)")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields (e.g. --override extensionPath=../../vscode-java extension=redhat.java)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; artifactsConfig?: string; artifacts?: boolean; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     try {
       const plan = loadTestPlan(planPath);
 
@@ -177,6 +181,8 @@ program
         noLLM: opts.llm === false,
         analysisMode: opts.analysisMode,
         logging: loggingOptions(opts),
+        artifactsConfig: opts.artifactsConfig,
+        artifacts: opts.artifacts === false ? { enabled: false } : undefined,
       });
 
       // Ensure VSCode is closed even if the process is interrupted (Ctrl+C)
@@ -208,11 +214,13 @@ program
   .option("--logs", "Save console and diagnostic logs for each plan")
   .option("--no-logs", "Disable configured log output (does not disable analysis-mode evidence)")
   .option("--log-output <dir>", "Enable logs under <dir>/<plan-name> (default: <output>/<plan-name>/logs)")
+  .option("--artifacts-config <file>", "Shared artifact defaults for every plan")
+  .option("--no-artifacts", "Disable configured artifact collection without changing logging or analysis")
   .option("--exclude <plans>", "Comma-separated plan names to exclude", "java-fresh-import")
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install for all plans")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields for all plans (e.g. --override extensionPath=../../vscode-java)")
-  .action(async (dir: string, opts: { output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (dir: string, opts: { output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; artifactsConfig?: string; artifacts?: boolean; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     const planFiles = fs.readdirSync(dir)
       .filter(f => f.endsWith(".yaml") || f.endsWith(".yml"))
       .sort();
@@ -276,6 +284,8 @@ program
           noLLM: opts.llm === false,
           analysisMode: opts.analysisMode,
           logging: loggingOptions(opts, planName),
+          artifactsConfig: opts.artifactsConfig,
+          artifacts: opts.artifacts === false ? { enabled: false } : undefined,
         });
 
         const cleanup = async () => {
@@ -323,6 +333,33 @@ program
     }
 
     process.exit(failedNames.length > 0 ? 1 : 0);
+  });
+
+program
+  .command("collect")
+  .description("Incrementally collect declared files without clearing results or changing test verdicts")
+  .requiredOption("--output <dir>", "Existing case output, or an output to create if the run never started")
+  .option("--artifacts-config <file>", "Shared artifact configuration")
+  .option("--plan <file>", "Plan whose artifact fields override shared defaults")
+  .action((opts: { output: string; artifactsConfig?: string; plan?: string }) => {
+    try {
+      const artifacts = mergeArtifactOptions(
+        opts.artifactsConfig === undefined ? undefined : loadArtifactConfig(opts.artifactsConfig),
+        opts.plan === undefined ? undefined : loadTestPlan(opts.plan).artifacts,
+      );
+      if (!artifacts || artifacts.enabled === false) throw new Error("collect requires enabled artifacts in --artifacts-config or --plan");
+      const manifest = new ArtifactCollector(path.resolve(opts.output), artifacts).collect();
+      const summary = summarizeArtifacts(manifest);
+      console.log(`Artifacts: ${summary.files} files, ${summary.storedBytes} bytes, ${summary.status}`);
+      for (const source of manifest.sources) {
+        if (source.reason) console.warn(`Artifact source ${source.id}: ${source.reason}`);
+      }
+      for (const error of summary.collectionErrors ?? []) console.error(`Artifact collection: ${error}`);
+      process.exit(summary.status === "complete" ? 0 : 1);
+    } catch (error) {
+      console.error(`Artifact collection failed: ${(error as Error).message}`);
+      process.exit(1);
+    }
   });
 
 program
