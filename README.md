@@ -357,6 +357,9 @@ ActionResolver uses a deterministic regex dictionary. Unmatched actions are exec
 | `verifyOutputChannel` | object | Output channel text checks with `channel`, `contains`, and `notContains` |
 | `verifyTerminal` | object | Terminal text checks with `contains` and `notContains` |
 
+When the Output panel is hidden, output channel checks open it through the
+Command Palette rather than a platform-dependent panel shortcut in the active editor.
+
 ### State-driven hover links
 
 Use `hoverAndClickAction "<text>" "<label>"` to hover editor text, wait for an

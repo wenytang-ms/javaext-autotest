@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { getModifierKey } from "./_shared.js";
+import { DEFAULT_TIMEOUT, getModifierKey } from "./_shared.js";
 
 interface DriverContext {
   getPage(): Page;
@@ -135,8 +135,8 @@ export const debugOperations: DebugOperations = {
     const page = this.getPage();
     const panel = page.locator(".part.panel").first();
     if (!(await panel.isVisible().catch(() => false))) {
-      await page.keyboard.press("Control+j");
-      await page.waitForTimeout(300);
+      await this.runCommandFromPalette("View: Toggle Output");
+      await panel.waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT });
     }
 
     const outputTab = page.locator('.part.panel .composite-bar li.action-item[role="tab"]')
