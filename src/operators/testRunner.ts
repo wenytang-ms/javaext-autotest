@@ -35,6 +35,7 @@ import { parseLoggingOptions, withRunLogging } from "./runLogging.js";
 import { LLMClient, type CaseScreenshot } from "./llmClient.js";
 import { StepVerifier } from "./stepVerifier.js";
 import { DEFAULT_VERIFY_TIMEOUT_S } from "./defaults.js";
+import { loadVscodeConfig, mergeVscodeEnvironment, parseVscodeEnvironment } from "./vscodeConfig.js";
 
 export interface TestRunnerOptions {
   /** Output directory for this test run. Contains screenshots/ and results.json. */
@@ -70,6 +71,15 @@ export class TestRunner {
   private finalization: Promise<RunEvidence | undefined> | null = null;
 
   constructor(plan: TestPlan, options: TestRunnerOptions = {}) {
+    if (plan.setup.vscodeConfig !== undefined) {
+      plan = {
+        ...plan,
+        setup: {
+          ...plan.setup,
+          ...mergeVscodeEnvironment(loadVscodeConfig(plan.setup.vscodeConfig), parseVscodeEnvironment(plan.setup)),
+        },
+      };
+    }
     this.plan = plan;
     this.outputDir = options.outputDir ?? null;
     this.screenshotDir = this.outputDir ? path.join(this.outputDir, "screenshots") : null;
@@ -89,6 +99,8 @@ export class TestRunner {
       : null;
 
     this.driver = new VscodeDriver({
+      locale: plan.setup.locale,
+      configuredEnvironment: plan.setup.vscodeConfig !== undefined,
       vscodeVersion: plan.setup.vscodeVersion,
       extensionPath: plan.setup.extensionPath,
       extensionPaths: plan.setup.extensionPaths,
@@ -198,12 +210,19 @@ export class TestRunner {
       await this.analyzeFailedStepsLegacy(results);
     }
 
+    const actualLocale = this.plan.setup.locale ? this.driver.getActualLocale() : null;
     const report: TestReport = {
       planName: this.plan.name,
       startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
       duration: endTime.getTime() - startTime.getTime(),
       results,
+      ...(this.plan.setup.locale ? {
+        vscodeLocale: {
+          requested: this.plan.setup.locale,
+          ...(actualLocale ? { actual: actualLocale } : {}),
+        },
+      } : {}),
       ...(crashed ? { crashed: true, crashReason } : {}),
       summary,
       ...(runEvidence ? { evidence: runEvidence } : {}),

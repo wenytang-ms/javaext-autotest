@@ -8,8 +8,16 @@ import yaml from "js-yaml";
 import type { RepoClone, TestPlan, TestStep } from "../types.js";
 import { parseLoggingOptions } from "./runLogging.js";
 import { parseArtifactOptions } from "./artifactConfig.js";
+import { loadVscodeConfig, mergeVscodeEnvironment, normalizeVscodeLocale, parseVscodeEnvironment } from "./vscodeConfig.js";
 
-export function loadTestPlan(filePath: string): TestPlan {
+export interface LoadTestPlanOptions {
+  /** Replaces the plan's shared configuration reference. Relative to cwd. */
+  vscodeConfig?: string;
+  /** Explicit display-language override. */
+  locale?: string;
+}
+
+export function loadTestPlan(filePath: string, options: LoadTestPlanOptions = {}): TestPlan {
   const absolutePath = path.resolve(filePath);
   if (!fs.existsSync(absolutePath)) {
     throw new Error(`Test plan not found: ${absolutePath}`);
@@ -19,10 +27,10 @@ export function loadTestPlan(filePath: string): TestPlan {
   const content = fs.readFileSync(absolutePath, "utf-8");
   const raw = yaml.load(content) as Record<string, unknown>;
 
-  return validateTestPlan(raw, planDir);
+  return validateTestPlan(raw, planDir, options);
 }
 
-function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPlan {
+function validateTestPlan(raw: Record<string, unknown>, planDir: string, options: LoadTestPlanOptions): TestPlan {
   if (!raw.name || typeof raw.name !== "string") {
     throw new Error("Test plan must have a 'name' field");
   }
@@ -31,7 +39,18 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
     throw new Error("Test plan must have a 'setup' section");
   }
 
-  const setup = raw.setup as Record<string, unknown>;
+  let setup = raw.setup as Record<string, unknown>;
+  const reference = options.vscodeConfig ?? setup.vscodeConfig;
+  if (reference !== undefined) {
+    if (typeof reference !== "string" || !reference.trim()) throw new Error("setup.vscodeConfig must be a non-empty path");
+    const configPath = options.vscodeConfig === undefined ? path.resolve(planDir, reference) : path.resolve(reference);
+    const overrides = parseVscodeEnvironment(setup);
+    if (overrides.vsix) overrides.vsix = overrides.vsix.map(file => path.resolve(planDir, file));
+    setup = { ...setup, ...mergeVscodeEnvironment(loadVscodeConfig(configPath), overrides), vscodeConfig: configPath };
+  }
+  if (options.locale !== undefined || setup.locale !== undefined) {
+    setup = { ...setup, locale: normalizeVscodeLocale(options.locale ?? setup.locale) };
+  }
   if (!setup.extension || typeof setup.extension !== "string") {
     throw new Error("Test plan setup must specify an 'extension'");
   }
@@ -73,6 +92,8 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
     ...(raw.logging === undefined ? {} : { logging: parseLoggingOptions(raw.logging, planDir) }),
     ...(raw.artifacts === undefined ? {} : { artifacts: parseArtifactOptions(raw.artifacts, planDir) }),
     setup: {
+      ...(setup.vscodeConfig === undefined ? {} : { vscodeConfig: setup.vscodeConfig as string }),
+      ...(setup.locale === undefined ? {} : { locale: setup.locale as string }),
       extension: setup.extension as string,
       extensionPath: setup.extensionPath
         ? path.resolve(planDir, setup.extensionPath as string)
@@ -107,10 +128,10 @@ function validateTestPlan(raw: Record<string, unknown>, planDir: string): TestPl
 }
 
 /** Validate test plan without loading — for CLI `validate` command */
-export function validateTestPlanFile(filePath: string): { valid: boolean; errors: string[] } {
+export function validateTestPlanFile(filePath: string, options: LoadTestPlanOptions = {}): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
   try {
-    loadTestPlan(filePath);
+    loadTestPlan(filePath, options);
     return { valid: true, errors: [] };
   } catch (e) {
     errors.push((e as Error).message);

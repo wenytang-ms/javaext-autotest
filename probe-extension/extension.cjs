@@ -117,7 +117,18 @@ function scheduleSnapshot(delay = 250) {
   }, delay);
 }
 
-function activate(context) {
+async function activate(context) {
+  const runtimePath = process.env.AUTOTEST_RUNTIME_OUTPUT;
+  if (runtimePath) {
+    const temporaryPath = `${runtimePath}.${process.pid}.tmp`;
+    await fs.promises.mkdir(path.dirname(runtimePath), { recursive: true });
+    await fs.promises.writeFile(temporaryPath, JSON.stringify({
+      language: vscode.env.language,
+      version: vscode.version,
+    }), "utf8");
+    await fs.promises.rename(temporaryPath, runtimePath);
+  }
+  if (runtimePath && !process.env[OUTPUT_ENV]) return;
   context.subscriptions.push(
     vscode.commands.registerCommand(DUMP_COMMAND, async (outputPath) => {
       await writeSnapshot(typeof outputPath === "string" ? outputPath : undefined);

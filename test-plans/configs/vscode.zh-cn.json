@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "vscodeVersion": "stable",
+  "locale": "zh-cn",
+  "extensions": [
+    "MS-CEINTL.vscode-language-pack-zh-hans"
+  ],
+  "settings": {
+    "editor.fontSize": 17,
+    "workbench.colorTheme": "Default Light Modern"
+  },
+  "workspaceSettings": {
+    "editor.tabSize": 3
+  }
+}

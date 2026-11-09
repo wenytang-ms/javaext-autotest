@@ -15,6 +15,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { VscodeDriverOptions } from "../types.js";
+import { normalizeVscodeLocale } from "../operators/vscodeConfig.js";
+import { prepareLanguagePack } from "./languagePack.js";
 import { commandOperations, type CommandOperations } from "./operations/commandOperations.js";
 import { clipboardOperations, type ClipboardOperations } from "./operations/clipboardOperations.js";
 import { debugOperations, type DebugOperations } from "./operations/debugOperations.js";
@@ -116,11 +118,17 @@ export class VscodeDriver {
   /** Lazy mapping of (commandId+args) → keybinding key for executeVSCodeCommand */
   private keybindingsByCommand: KeybindingEntry[] = [];
   private launchDiagnostics: Array<{ capturedAt: string; stage: string; details?: Record<string, unknown> }> = [];
+  private ownedEnvironmentDir: string | null = null;
+  private actualLocale: string | null = null;
 
   constructor(options: VscodeDriverOptions = {}) {
     this.options = {
       vscodeVersion: "insiders",
       ...options,
+      ...(options.locale === undefined ? {} : {
+        locale: normalizeVscodeLocale(options.locale),
+        configuredEnvironment: true,
+      }),
     };
   }
 
@@ -141,21 +149,36 @@ export class VscodeDriver {
     this.actualExtensionsDir = null;
     this.probeSnapshotPath = null;
     this.launchDiagnostics = [];
+    this.actualLocale = null;
 
     const version = this.options.vscodeVersion ?? "insiders";
     this.recordLaunchDiagnostic("resolve-vscode", { requestedVersion: version });
     const vscodePath = await downloadAndUnzipVSCode(version);
     this.recordLaunchDiagnostic("resolve-cli", { executablePath: vscodePath });
-    const [cli, ...baseArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
+    const [cli, ...resolvedArgs] = resolveCliArgsFromVSCodeExecutablePath(vscodePath);
+    let baseArgs = resolvedArgs;
+    if (this.options.configuredEnvironment) {
+      if (this.ownedEnvironmentDir) throw new Error("Close the previous configured environment before launching again.");
+      this.ownedEnvironmentDir = fs.mkdtempSync(path.join(this.getTemporaryDirectory(), "autotest-environment-"));
+      baseArgs = [
+        ...resolvedArgs.filter(arg => !arg.startsWith("--user-data-dir=") && !arg.startsWith("--extensions-dir=")),
+        `--user-data-dir=${path.join(this.ownedEnvironmentDir, "user-data")}`,
+        `--extensions-dir=${path.join(this.ownedEnvironmentDir, "extensions")}`,
+      ];
+    }
 
-    const userDataDir = this.options.userDataDir ?? fs.mkdtempSync(path.join(this.getTemporaryDirectory(), "autotest-"));
+    const userDataDir = this.options.userDataDir ?? (this.ownedEnvironmentDir
+      ? path.join(this.ownedEnvironmentDir, "user-data")
+      : fs.mkdtempSync(path.join(this.getTemporaryDirectory(), "autotest-")));
     const actualUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1] ?? userDataDir;
     this.actualUserDataDir = actualUserDataDir;
+    if (this.options.configuredEnvironment) fs.mkdirSync(actualUserDataDir, { recursive: true });
     const extensionsDir = baseArgs.find(a => a.startsWith("--extensions-dir="))?.split("=")[1];
     this.actualExtensionsDir = extensionsDir ?? null;
-    const bundledProbePath = this.options.enableEvidenceProbe
+    const bundledProbePath = this.options.enableEvidenceProbe || this.options.locale
       ? getBundledProbeExtensionPath()
       : null;
+    if (this.options.locale && !bundledProbePath) throw new Error("Locale validation requires the bundled AutoTest probe extension.");
     const extensionDevelopmentPaths = [
       ...(this.options.extensionPath ? [this.options.extensionPath] : []),
       ...(this.options.extensionPaths ?? []),
@@ -194,7 +217,7 @@ export class VscodeDriver {
     // Wipe user data dir to prevent window restoration and stale file index.
     // Extensions are in a separate --extensions-dir so they won't be affected.
     const defaultUserDataDir = baseArgs.find(a => a.startsWith("--user-data-dir="))?.split("=")[1];
-    if (defaultUserDataDir && fs.existsSync(defaultUserDataDir)) {
+    if (!this.options.configuredEnvironment && defaultUserDataDir && fs.existsSync(defaultUserDataDir)) {
       try {
         fs.rmSync(defaultUserDataDir, { recursive: true, force: true });
       } catch {
@@ -205,10 +228,19 @@ export class VscodeDriver {
     }
 
     // Pre-install marketplace extensions before launching
-    const allExtensions = [
+    const providedExtensionIds = this.options.configuredEnvironment
+      ? new Set([...extensionDevelopmentPaths, ...localExtensions].map(extensionPath => {
+        const manifest = JSON.parse(fs.readFileSync(path.join(extensionPath, "package.json"), "utf8"));
+        return `${manifest.publisher}.${manifest.name}`.toLowerCase();
+      }))
+      : new Set<string>();
+    const requestedExtensions = [
       ...(this.options.extensions ?? []),
       ...(this.options.vsix ?? []),
     ];
+    const allExtensions = this.options.configuredEnvironment
+      ? [...new Set(requestedExtensions)].filter(extension => !providedExtensionIds.has(extension.toLowerCase()))
+      : requestedExtensions;
     const usePreRelease = this.options.preRelease === true; // default false
     this.recordLaunchDiagnostic("install-extensions", { extensions: allExtensions, preRelease: usePreRelease });
     if (allExtensions.length > 0) {
@@ -235,10 +267,18 @@ export class VscodeDriver {
           });
         } catch (e) {
           this.recordLaunchDiagnostic("extension-install-failed", { extension: ext, message: (e as Error).message });
+          if (this.options.configuredEnvironment) {
+            throw new Error(`Failed to install required extension ${ext}: ${(e as Error).message}`, { cause: e });
+          }
           console.warn(`   ⚠️  Failed to install ${ext}: ${(e as Error).message}`);
         }
       }
       console.log(`📦 Extensions installed\n`);
+    }
+
+    if (this.options.locale) {
+      if (!extensionsDir) throw new Error("Locale configuration requires an isolated extensions directory.");
+      prepareLanguagePack(actualUserDataDir, extensionsDir, this.options.locale);
     }
 
     const trustMode = this.options.workspaceTrust ?? "disabled";
@@ -258,6 +298,7 @@ export class VscodeDriver {
       "--password-store=basic",
       "--enable-smoke-test-driver",
       ...baseArgs,
+      ...(this.options.locale ? [`--locale=${this.options.locale}`] : []),
     ];
 
     for (const extensionPath of extensionDevelopmentPaths) {
@@ -278,8 +319,10 @@ export class VscodeDriver {
       } else {
         // Fallback: copy workspace to temp dir (for non-git workspaces)
         const tmpDir = this.getTemporaryDirectory();
-        const fixedDir = path.join(tmpDir, "autotest-workspace");
-        try {
+        const fixedDir = this.options.configuredEnvironment
+          ? fs.mkdtempSync(path.join(tmpDir, "autotest-configured-workspace-"))
+          : path.join(tmpDir, "autotest-workspace");
+        if (!this.options.configuredEnvironment) try {
           for (const entry of fs.readdirSync(tmpDir)) {
             if (entry.startsWith("autotest-ws-") || entry === "autotest-workspace") {
               fs.rmSync(path.join(tmpDir, entry), { recursive: true, force: true });
@@ -312,8 +355,10 @@ export class VscodeDriver {
       this.recordLaunchDiagnostic("prepare-file", { file: this.options.filePath });
       // Single file mode — copy the file to a temp dir and open it directly
       const tmpDir = this.getTemporaryDirectory();
-      const fixedDir = path.join(tmpDir, "autotest-workspace");
-      if (fs.existsSync(fixedDir)) fs.rmSync(fixedDir, { recursive: true, force: true });
+      const fixedDir = this.options.configuredEnvironment
+        ? fs.mkdtempSync(path.join(tmpDir, "autotest-configured-file-"))
+        : path.join(tmpDir, "autotest-workspace");
+      if (!this.options.configuredEnvironment && fs.existsSync(fixedDir)) fs.rmSync(fixedDir, { recursive: true, force: true });
       fs.mkdirSync(fixedDir, { recursive: true });
       const destFile = path.join(fixedDir, path.basename(this.options.filePath));
       fs.copyFileSync(this.options.filePath, destFile);
@@ -363,6 +408,9 @@ export class VscodeDriver {
     fs.mkdirSync(path.dirname(keybindingsPath), { recursive: true });
     fs.writeFileSync(keybindingsPath, "[]");
 
+    const runtimePath = this.options.locale
+      ? path.join(actualUserDataDir, "User", "autotest-runtime.json")
+      : null;
     this.recordLaunchDiagnostic("launch-electron", { executablePath: vscodePath, args });
     this.app = await _electron.launch({
       executablePath: vscodePath,
@@ -370,6 +418,7 @@ export class VscodeDriver {
         ...process.env,
         NODE_ENV: "development",
         ...(this.probeSnapshotPath ? { AUTOTEST_PROBE_OUTPUT: this.probeSnapshotPath } : {}),
+        ...(runtimePath ? { AUTOTEST_RUNTIME_OUTPUT: runtimePath } : {}),
       },
       args,
     });
@@ -387,6 +436,7 @@ export class VscodeDriver {
     this.recordLaunchDiagnostic("wait-workbench", { timeoutMs: workbenchTimeout });
     await this.page.locator(WORKBENCH_SELECTOR).waitFor({ state: "visible", timeout: workbenchTimeout });
     this.recordLaunchDiagnostic("workbench-ready");
+    if (runtimePath) await this.verifyRuntimeLocale(runtimePath, workbenchTimeout);
 
     // Auto-dismiss Electron native dialogs (e.g. redhat.java refactoring
     // confirmation, delete file confirmation). These dialogs are outside
@@ -455,6 +505,28 @@ export class VscodeDriver {
     return this.launchDiagnostics;
   }
 
+  getActualLocale(): string | null {
+    return this.actualLocale;
+  }
+
+  private async verifyRuntimeLocale(runtimePath: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(runtimePath)) {
+        const runtime = JSON.parse(fs.readFileSync(runtimePath, "utf8")) as { language?: unknown };
+        this.actualLocale = normalizeVscodeLocale(runtime.language);
+        if (this.actualLocale !== this.options.locale) {
+          throw new Error(`Requested locale ${this.options.locale}, but VS Code reports ${this.actualLocale}. Install the matching language pack.`);
+        }
+        console.log(`🌐 VS Code locale: ${this.actualLocale}`);
+        this.recordLaunchDiagnostic("locale-verified", { requested: this.options.locale, actual: this.actualLocale });
+        return;
+      }
+      await this.getPage().waitForTimeout(100);
+    }
+    throw new Error(`Unable to verify requested locale ${this.options.locale}: runtime probe did not write ${runtimePath}`);
+  }
+
   private recordLaunchDiagnostic(stage: string, details?: Record<string, unknown>): void {
     if (!this.options.enableLaunchDiagnostics) return;
     this.launchDiagnostics.push({ capturedAt: new Date().toISOString(), stage, ...(details ? { details } : {}) });
@@ -512,7 +584,15 @@ export class VscodeDriver {
     try {
       await options.beforeWorkspaceCleanup?.();
     } finally {
-      await this.cleanupWorkspace();
+      try {
+        await this.cleanupWorkspace();
+      } finally {
+        if (this.ownedEnvironmentDir) {
+          const directory = this.ownedEnvironmentDir;
+          fs.rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 });
+          this.ownedEnvironmentDir = null;
+        }
+      }
     }
   }
 
@@ -800,7 +880,7 @@ export class VscodeDriver {
     const tmpDir = this.getTemporaryDirectory();
 
     // Clean up ALL stale autotest-worktree-* directories from previous runs
-    try {
+    if (!this.options.configuredEnvironment) try {
       for (const entry of fs.readdirSync(tmpDir)) {
         if (entry.startsWith("autotest-worktree")) {
           const stale = path.join(tmpDir, entry);

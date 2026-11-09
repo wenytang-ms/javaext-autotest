@@ -1,5 +1,6 @@
 export { VscodeDriver } from "./drivers/vscodeDriver.js";
-export { loadTestPlan, validateTestPlanFile } from "./operators/planParser.js";
+export { loadTestPlan, validateTestPlanFile, type LoadTestPlanOptions } from "./operators/planParser.js";
+export { loadVscodeConfig, mergeVscodeEnvironment, normalizeVscodeLocale } from "./operators/vscodeConfig.js";
 export { ActionResolver } from "./operators/actionResolver.js";
 export { StepVerifier } from "./operators/stepVerifier.js";
 export { LLMClient, type LLMClientOptions, type StepVerificationContext } from "./operators/llmClient.js";

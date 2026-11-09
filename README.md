@@ -39,6 +39,86 @@ npx autotest run test-plans/java-maven.yaml --analysis-mode evidence-only
 npx autotest analyze test-results --analysis-mode case --report-only
 ```
 
+### Shared VS Code environment configuration
+
+Environment configuration is opt-in. Reference a JSON file with
+`setup.vscodeConfig`, or supply `--vscode-config` to `run`, `run-all`, or
+`validate`. No configuration file is discovered automatically, and plans
+without a configuration reference or locale keep their existing startup path.
+
+```json
+{
+  "schemaVersion": 1,
+  "vscodeVersion": "stable",
+  "locale": "zh-cn",
+  "extensions": ["MS-CEINTL.vscode-language-pack-zh-hans"],
+  "settings": {
+    "editor.fontSize": 17
+  },
+  "workspaceSettings": {
+    "editor.tabSize": 3
+  }
+}
+```
+
+```yaml
+setup:
+  vscodeConfig: "../configs/vscode.zh-cn.json"
+  extension: "redhat.java"
+  workspace: "../fixtures/sample"
+```
+
+```powershell
+npx autotest validate test-plans\configuration\vscode-config-smoke.yaml
+npx autotest run test-plans\configuration\vscode-config-smoke.yaml --no-llm
+npx autotest run-all test-plans --vscode-config configs\vscode.zh-cn.json
+```
+
+The supported JSON keys are `schemaVersion` (required, `1`), `vscodeVersion`
+(`stable` or `insiders`), `locale`, `extensions`, `vsix`, `preRelease`,
+`settings`, and `workspaceSettings`. Unknown JSON keys, invalid values, unreadable
+files, and malformed JSON fail validation before launch. This is an AutoTest
+format, not a drop-in configuration for another test runner.
+
+Precedence is framework defaults, shared JSON, YAML setup, then explicit CLI
+overrides. `--vscode-config` replaces the YAML reference rather than layering
+another file. Settings merge by complete setting key; each key's value, including
+objects and arrays, is replaced as a whole. Extension/VSIX lists combine and
+deduplicate. JSON VSIX paths are relative to the JSON file, YAML paths are
+relative to the plan, and CLI configuration paths are relative to cwd.
+Workspace settings apply only when a workspace is opened. Framework-enforced
+telemetry disabling remains effective.
+
+Configured runs use owned, per-run user-data and extensions directories. User
+settings are written to `User\settings.json`, workspace settings to the isolated
+workspace's `.vscode\settings.json`, and required extension installation errors
+stop startup. These directories are removed after shutdown and artifact
+collection. Existing profiles and unrelated temporary workspaces are not cleared.
+
+Use `setup.locale` or `--locale <language>` to explicitly select a display
+language (`en`, `zh-cn`, etc.). Non-English locales require a matching installed
+language pack; installation alone does not select a language. In the owned
+profile, AutoTest registers installed `contributes.localizations` resources in
+VS Code's native `languagepacks.json` because CLI installation does not always
+create it. VS Code itself generates and loads the translation cache. A minimal
+startup probe reads `vscode.env.language` and rejects a mismatch before steps
+run, independently of evidence/LLM mode and without consuming a command
+keybinding slot. Locale-enabled reports include `vscodeLocale.requested` and,
+when observed, `vscodeLocale.actual`.
+
+Action syntax is not translated. Prefer `executeVSCodeCommand <id>` in
+localized plans, and supply actual localized labels/text in UI actions and
+deterministic assertions. This configuration feature does not make every
+existing English-label operation language-independent. Notification toasts
+remain suppressed by `--enable-smoke-test-driver`; locale selection does not
+change that behavior.
+
+SDK callers can use
+`loadTestPlan(planPath, { vscodeConfig: configPath, locale: "zh-cn" })` before
+constructing `TestRunner`. `loadVscodeConfig` and `mergeVscodeEnvironment` are
+also exported for explicitly composed SDK environments. The example smoke plan
+uses the bundled probe as its primary extension and does not start a Java LS.
+
 ### Configurable logging
 
 Console output remains enabled by default. File logging is opt-in and independent

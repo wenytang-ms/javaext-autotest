@@ -1,0 +1,22 @@
+name: "VS Code Shared Configuration - Chinese Smoke"
+description: "Verify shared user/workspace settings and actual Chinese UI without a Java language server."
+setup:
+  vscodeConfig: "../configs/vscode.zh-cn.json"
+  extension: "vscjava.autotest-probe"
+  workspace: ".."
+steps:
+  - id: "verify-user-settings"
+    action: "executeVSCodeCommand workbench.action.openSettingsJson"
+    verifyEditor:
+      contains: '"editor.fontSize": 17'
+    verifyEditorTab:
+      title: "settings.json"
+    verifyFile:
+      path: "~/.vscode/settings.json"
+      contains: '"editor.tabSize": 3'
+  - id: "verify-chinese-welcome"
+    action: "executeVSCodeCommand workbench.action.openWalkthrough"
+    verifyEditorTab:
+      title: "欢迎"
+      active: true
+    timeout: 30

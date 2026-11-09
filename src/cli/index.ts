@@ -109,6 +109,8 @@ program
   .description("Execute a test plan against VSCode")
   .option("--attach <port>", "Connect to an existing VSCode via CDP port")
   .option("--interactive", "Step-by-step execution with manual confirmation")
+  .option("--vscode-config <file>", "Shared VS Code JSON configuration (replaces the plan reference)")
+  .option("--locale <language>", "Override the VS Code display language")
   .option("--output <dir>", "Output directory (default: ./test-results/<plan-name>)")
   .option("--no-llm", "Skip LLM verification (auto-pass all verify fields)")
   .addOption(analysisModeOption())
@@ -120,9 +122,9 @@ program
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install (overrides marketplace versions)")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields (e.g. --override extensionPath=../../vscode-java extension=redhat.java)")
-  .action(async (planPath: string, opts: { attach?: string; interactive?: boolean; output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; artifactsConfig?: string; artifacts?: boolean; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (planPath: string, opts: { vscodeConfig?: string; locale?: string; attach?: string; interactive?: boolean; output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; artifactsConfig?: string; artifacts?: boolean; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     try {
-      const plan = loadTestPlan(planPath);
+      const plan = loadTestPlan(planPath, { vscodeConfig: opts.vscodeConfig, locale: opts.locale });
 
       // Apply --pre-release flag
       if (opts.preRelease) {
@@ -208,6 +210,8 @@ program
 program
   .command("run-all <dir>")
   .description("Run all test plans in a directory and generate an aggregate summary")
+  .option("--vscode-config <file>", "Shared VS Code JSON configuration for every plan")
+  .option("--locale <language>", "Override the VS Code display language for every plan")
   .option("--output <dir>", "Output directory (default: ./test-results)")
   .option("--no-llm", "Skip LLM analysis")
   .addOption(analysisModeOption())
@@ -220,7 +224,7 @@ program
   .option("--vsix <paths>", "Comma-separated VSIX file paths to install for all plans")
   .option("--pre-release", "Install pre-release versions of marketplace extensions (default: stable)")
   .option("--override <kv...>", "Override setup fields for all plans (e.g. --override extensionPath=../../vscode-java)")
-  .action(async (dir: string, opts: { output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; artifactsConfig?: string; artifacts?: boolean; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
+  .action(async (dir: string, opts: { vscodeConfig?: string; locale?: string; output?: string; llm?: boolean; analysisMode: AnalysisMode; logs?: boolean; logOutput?: string; artifactsConfig?: string; artifacts?: boolean; exclude?: string; vsix?: string; preRelease?: boolean; override?: string[] }) => {
     const planFiles = fs.readdirSync(dir)
       .filter(f => f.endsWith(".yaml") || f.endsWith(".yml"))
       .sort();
@@ -245,7 +249,7 @@ program
       console.log(`${"=".repeat(60)}`);
 
       try {
-        const plan = loadTestPlan(planPath);
+        const plan = loadTestPlan(planPath, { vscodeConfig: opts.vscodeConfig, locale: opts.locale });
 
         // Apply --pre-release flag
         if (opts.preRelease) {
@@ -405,8 +409,10 @@ program
 program
   .command("validate <plan>")
   .description("Validate a test plan YAML file")
-  .action((planPath: string) => {
-    const result = validateTestPlanFile(planPath);
+  .option("--vscode-config <file>", "Validate with a shared VS Code JSON configuration")
+  .option("--locale <language>", "Validate a display-language override")
+  .action((planPath: string, opts: { vscodeConfig?: string; locale?: string }) => {
+    const result = validateTestPlanFile(planPath, opts);
     if (result.valid) {
       console.log(`✅ Test plan is valid: ${planPath}`);
     } else {

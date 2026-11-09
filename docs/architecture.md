@@ -106,6 +106,39 @@ src/
 
 ## Execution flow
 
+### Opt-in VS Code environment configuration
+
+`operators/vscodeConfig.ts` validates versioned shared JSON configuration and
+defines setting-key replacement and extension/VSIX union semantics. `PlanParser`
+loads `setup.vscodeConfig` relative to the plan (or a CLI/SDK replacement relative
+to cwd), resolves each source's VSIX paths, and merges explicit setup fields
+before applying historical defaults. `run`, `run-all`, and `validate` accept
+`--vscode-config` and `--locale`. There is no automatic configuration discovery.
+
+`TestRunner` forwards the resolved environment to `VscodeDriver`; SDK-created
+plans can also reference a shared configuration directly, with paths relative
+to cwd. Configured startup uses owned user-data/extensions directories, strict
+required installation errors, and workspace isolation without removing other
+runs' temporary directories. Driver applies user/workspace settings before
+launch and removes owned environment directories after the existing
+post-shutdown artifact boundary.
+
+Locale selection is a launch option, not a setting. `drivers/languagePack.ts`
+prepares VS Code's native language-pack registry from installed extension
+manifests only inside the owned profile, covering CLI versions that do not
+register language packs during installation. VS Code generates its own NLS
+cache. A locale-only activation of the bundled probe writes a minimal runtime
+language record, without diagnostics subscriptions or evidence output.
+Driver checks `vscode.env.language` before steps and reports requested/actual
+locale on explicitly localized runs. No command keybinding slot is used.
+Unconfigured legacy runs retain their launch and report shape; locale validation
+does not imply case/evidence mode.
+
+Literal action arguments and assertions are not translated. Existing localized
+scenarios should use stable command IDs and explicit target-language text.
+Smoke-driver notification suppression and the public command-slot limit remain
+unchanged.
+
 For each step, `TestRunner` performs this sequence:
 
 1. Apply `waitBefore`, if present.

@@ -94,7 +94,21 @@ export interface ArtifactCollectionSummary {
   collectionErrors?: string[];
 }
 
+export interface VscodeEnvironmentConfig {
+  vscodeVersion?: "stable" | "insiders";
+  locale?: string;
+  extensions?: string[];
+  vsix?: string[];
+  preRelease?: boolean;
+  settings?: Record<string, unknown>;
+  workspaceSettings?: Record<string, unknown>;
+}
+
 export interface TestSetup {
+  /** Shared JSON environment configuration, relative to the test plan. */
+  vscodeConfig?: string;
+  /** VS Code display language. Selecting a locale enables runtime language validation. */
+  locale?: string;
   extension: string;
   extensionPath?: string;
   /** Additional local extension development paths to load. */
@@ -494,6 +508,9 @@ export interface TestAnalysis {
 }
 
 export interface VscodeDriverOptions {
+  locale?: string;
+  /** Use per-run user-data/extensions directories and fail on required installation errors. */
+  configuredEnvironment?: boolean;
   vscodeVersion?: "stable" | "insiders";
   extensionPath?: string;
   /** Additional local extension development paths to load. */
@@ -594,6 +611,8 @@ export interface StepResult {
 }
 
 export interface TestReport {
+  /** Present only when a display language was explicitly requested. */
+  vscodeLocale?: { requested: string; actual?: string };
   planName: string;
   startTime: string;
   endTime: string;
